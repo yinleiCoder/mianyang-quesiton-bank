@@ -53,29 +53,24 @@ export function ImportPage({ nodes, jobs, initial }) {
   const refreshingRef = React.useRef(false)
   const dirtyRef = React.useRef(false)
   const lastRefreshRef = React.useRef(0)
+  const timerRef = React.useRef(null)
+
+  // 卸载时把延后的那次刷新取消掉（别对着已卸载的组件 setState）
+  React.useEffect(() => () => clearTimeout(timerRef.current), [])
 
   /**
-   * 刷新任务/页/题。三条约束（都是踩过的坑）：
-   *   1. **合并**：三个并发跑道每页都会调它，并发发起会让响应乱序返回、旧数据覆盖新数据；
-   *   2. **防抖**：调用密度很高（每页一次 × 3 跑道），不加节流会持续压 Supabase 的连接池
-   *      ——实测撞到过 PGRST003「Timed out acquiring connection from connection pool」；
-   *   3. **绝不抛出**：它会作为回调被 fire-and-forget 地调用（不 await），一旦抛错就成了
-   *      未处理的 rejection，Next 的覆盖层会显示成没头没脑的 [object Object]。
-   *      PostgrestError 是普通对象不是 Error，所以这里必须自己兜住而不是指望错误页。
+   * 真正去查库的那一段（节流与排队在 refresh 里）。单独拆出来是为了让 refresh 能被
+   * 定时器延后调用而不必自引用——React Compiler 遇到自引用的记忆化会整个放弃。
    * withItems=false 时只刷任务与页（跑批中够用，题列表跑完再拉，那个查询重得多）。
    */
-  const refresh = React.useCallback(async (withItems = true) => {
+  const runRefresh = React.useCallback(async (withItems) => {
     const id = jobIdRef.current
     if (!id) return
     if (refreshingRef.current) {
       dirtyRef.current = true // 正在刷：记一笔，完成后补刷一次，避免丢更新
       return
     }
-    // 防抖：距上次刷新不足 1.2 秒就跳过（进度晚一两秒没关系，连接池被打满影响所有人）
-    const now = Date.now()
-    if (now - lastRefreshRef.current < 1200) return
-    lastRefreshRef.current = now
-
+    lastRefreshRef.current = Date.now()
     refreshingRef.current = true
     try {
       do {
@@ -95,6 +90,38 @@ export function ImportPage({ nodes, jobs, initial }) {
       refreshingRef.current = false
     }
   }, [])
+
+  /**
+   * 刷新任务/页/题（调用方 await 它来"落库后重新拉数据"）。四条约束（都是踩过的坑）：
+   *   1. **合并**：并发发起会让响应乱序返回、旧数据覆盖新数据，所以同时在跑的只允许一次；
+   *   2. **节流**：调用密度可能很高，不加节流会持续压 Supabase 的连接池——实测撞到过
+   *      PGRST003「Timed out acquiring connection from connection pool」；
+   *   3. **节流窗口内排队，不丢**：丢弃会让"写完库就 await 它"的调用方（勾选题目、
+   *      编辑器保存、重试失败页）永远等不到新数据——勾选框勾上又弹回去、
+   *      保存完内容还是旧的，都是这么来的；
+   *   4. **绝不抛出**：它会作为回调被 fire-and-forget 地调用（不 await），一旦抛错就成了
+   *      未处理的 rejection，Next 的覆盖层会显示成没头没脑的 [object Object]。
+   *      PostgrestError 是普通对象不是 Error，所以必须自己兜住而不是指望错误页。
+   */
+  const refresh = React.useCallback(
+    (withItems = true) => {
+      if (!jobIdRef.current) return
+      // 节流：距上次刷新不足 1.2 秒就**推迟**到窗口结束再刷（进度晚一两秒没关系，
+      // 连接池被打满影响所有人），但这次请求不能凭空消失。后来的调用覆盖先前的排队
+      // （withItems 取最后一次：勾选后的那次要带题列表，不能被轻量的进度刷新顶掉）
+      const wait = 1200 - (Date.now() - lastRefreshRef.current)
+      if (wait > 0 && !refreshingRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          runRefresh(withItems)
+        }, wait)
+        return
+      }
+      return runRefresh(withItems)
+    },
+    [runRefresh]
+  )
 
   async function openJob(jobId) {
     setLoading(true)

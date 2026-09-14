@@ -55,12 +55,49 @@ export function ImportPreview({ job, items, onRefresh }) {
   const [editing, setEditing] = React.useState(null) // item id（条件挂载用）
   const [busy, setBusy] = React.useState(false)
   const [progress, setProgress] = React.useState(null)
+  // 乐观状态：id → status，勾选/取消**先落本地**。
+  //
+  // 为什么必须有：复选框的 checked 来自服务端的 status，而 React 处理完 change 事件后会把
+  // 受控 input 的 DOM 值打回"上次提交的 props"（react-dom 的 restoreStateOfTarget，每次
+  // change 都跑）。于是"写库成功 → 父组件重新拉题 → 才勾上"这条链路上，勾选框会先弹回原样，
+  // 看起来就是**单击没反应**；再点一下时刷新恰好回来了，才勾上。刷新本身还有 1.2s 节流
+  // （import-page），被吞掉时就是一直不勾上。
+  const [optimistic, setOptimistic] = React.useState({})
 
-  const list = React.useMemo(() => items.filter(FILTERS.find((f) => f.key === filter).match), [items, filter])
+  // 服务端数据追上乐观值后撤掉覆盖。不在这里主动清：刷新可能被节流延后，清早了勾选会闪回去；
+  // 等 items 真的变成这个值再撤，界面才是单调的
+  React.useEffect(() => {
+    setOptimistic((prev) => {
+      const ids = Object.keys(prev)
+      if (ids.length === 0) return prev
+      const fresh = new Map(items.map((i) => [i.id, i.status]))
+      const next = { ...prev }
+      let dropped = false
+      for (const id of ids) {
+        const s = fresh.get(id)
+        // 服务端追上了就撤；imported 是终态（库里不可再改），服务端说了算，永远撤
+        if (s === next[id] || s === "imported") {
+          delete next[id]
+          dropped = true
+        }
+      }
+      return dropped ? next : prev
+    })
+  }, [items])
+
+  // 渲染、计数、入库都看这一份：界面上的勾、"已勾选 N 道"、真正提交的 id 不能各说各话
+  const view = React.useMemo(() => {
+    if (Object.keys(optimistic).length === 0) return items
+    return items.map((i) =>
+      optimistic[i.id] !== undefined && optimistic[i.id] !== i.status ? { ...i, status: optimistic[i.id] } : i
+    )
+  }, [items, optimistic])
+
+  const list = React.useMemo(() => view.filter(FILTERS.find((f) => f.key === filter).match), [view, filter])
   // 默认全部保留；缺答案的不勾（入库必然被 DB 拒），但教师可以手动勾上作为"待补"占位
   const keptIds = React.useMemo(
-    () => items.filter((i) => i.status === "kept" || i.status === "imported").map((i) => i.id),
-    [items]
+    () => view.filter((i) => i.status === "kept" || i.status === "imported").map((i) => i.id),
+    [view]
   )
 
   // 批量勾选时跳过"入库必被拒"的题：与其让它们到入库时报错，不如现在就留下让人补
@@ -79,19 +116,39 @@ export function ImportPreview({ job, items, onRefresh }) {
 
   async function setStatus(ids, status) {
     if (ids.length === 0) return
+    // 已入库的题库里改不了（RPC 里也排除了 imported）：别写、也别盖乐观值——盖了服务端
+    // 永远不会"追上"，那个勾选状态就成了库里不存在的假象（「本页全不选」会把它们一并传进来）
+    const locked = new Set(view.filter((i) => i.status === "imported").map((i) => i.id))
+    const target = ids.filter((id) => !locked.has(id))
+    if (target.length === 0) return
+    // 先改本地再写库：勾选立刻可见，不等数据库往返（见上面 optimistic 的注释）
+    setOptimistic((prev) => {
+      const next = { ...prev }
+      for (const id of target) next[id] = status
+      return next
+    })
     const supabase = createClient()
-    for (let i = 0; i < ids.length; i += 500) {
+    for (let i = 0; i < target.length; i += 500) {
       const { error } = await supabase.rpc("import_set_items_status", {
-        p_item_ids: ids.slice(i, i + 500),
+        p_item_ids: target.slice(i, i + 500),
         p_status: status,
       })
-      if (error) return toast.error(error.message)
+      if (error) {
+        // 没写进去的那部分（含后面没轮到的批次）撤回乐观值，界面回到服务端的真实状态
+        const failed = new Set(target.slice(i))
+        setOptimistic((prev) => {
+          const next = { ...prev }
+          for (const id of failed) delete next[id]
+          return next
+        })
+        return toast.error(error.message)
+      }
     }
     await onRefresh()
   }
 
   async function importSelected() {
-    const ids = items.filter((i) => i.status === "kept" && i.status !== "imported").map((i) => i.id)
+    const ids = view.filter((i) => i.status === "kept").map((i) => i.id)
     if (ids.length === 0) return toast.error("没有勾选任何题目")
     setBusy(true)
     setProgress({ done: 0, total: ids.length })
@@ -134,7 +191,7 @@ export function ImportPreview({ job, items, onRefresh }) {
             }`}
           >
             {f.label}
-            <span className="ml-1 opacity-70">{items.filter(f.match).length}</span>
+            <span className="ml-1 opacity-70">{view.filter(f.match).length}</span>
           </button>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
