@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -45,7 +46,7 @@ import { Loader2Icon, MailIcon, PencilIcon, Trash2Icon } from "lucide-react"
 
 const NONE_SCHOOL = "__none__"
 
-export function ProfileEditor({ userId, email, initial, schools }) {
+export function ProfileEditor({ userId, email, roles, initial, schools }) {
   const router = useRouter()
   const supabaseRef = useRef(null)
   const getSb = () => (supabaseRef.current ??= createClient())
@@ -265,6 +266,21 @@ export function ProfileEditor({ userId, email, initial, schools }) {
             {!initial.schoolId && (
               <p className="text-xs text-amber-600">尚未绑定学校：绑定后才能出题与参与共建。</p>
             )}
+          </div>
+
+          {/* 角色只读：分配入口在管理台，这里只做展示（文案见 lib/roles.js） */}
+          <div className="grid gap-1.5">
+            <Label>角色</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {roles.map((label) => (
+                <Badge key={label} variant="secondary" className="font-normal">
+                  {label}
+                </Badge>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              角色由管理员分配，不能自行修改；教研组长 / 市级专家属于科目节点任命，不在此显示。
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-1">

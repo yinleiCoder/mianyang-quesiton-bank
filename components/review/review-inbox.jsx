@@ -1,17 +1,64 @@
 "use client"
 
 // 审批收件箱：我的待办（组长/专家环节统一）→ 处理入口到详情页；管理员多一个"管理"页签（可看全任务/待指派）。
+// 市级专家另有「一键入库」：把待办里的 city 环节内容任务一次性通过（详见 lib/bulk-rpc.js 的逐条策略）。
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { createClient } from "@/lib/supabase/client"
 import { approvalStateChip } from "@/lib/admin-records"
 import { fmtDateTime24 } from "@/lib/format"
+import { bulkResultMessage, progressReporter, runEachRpc } from "@/lib/bulk-rpc"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/empty-state"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ArrowRightIcon, CheckCircle2Icon, CircleSlash2Icon, InboxIcon, RotateCcwIcon } from "lucide-react"
 
-export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage }) {
+export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage, publishableIds = [] }) {
+  const router = useRouter()
   const [tab, setTab] = useState("mine")
+  // 待入库的任务 id：以服务端为准（router.refresh() 后 prop 会换新），本页批量通过的
+  // 记进 processed 摘掉——这样「别处已处理」的失败项也不会在按钮计数里阴魂不散
+  const [processed, setProcessed] = useState([])
+  const publishIds = publishableIds.filter((id) => !processed.includes(id))
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(null) // {done, total}
+
+  async function publishAll() {
+    const ids = publishIds
+    if (ids.length === 0) return
+    const supabase = createClient()
+    setBusy(true)
+    setProgress({ done: 0, total: ids.length })
+    try {
+      const { ok, failed } = await runEachRpc(
+        ids,
+        (approvalId) =>
+          supabase.rpc("review_decide", {
+            p_approval_id: approvalId,
+            p_pass: true,
+            p_comment: null,
+          }),
+        progressReporter(setProgress)
+      )
+      const failedIds = new Set(failed.map((f) => f.id))
+      // 只有通过的才摘掉：失败的留在待办里，点开还能看到原因（多半是被别处处理过）
+      setProcessed((prev) => [...prev, ...ids.filter((id) => !failedIds.has(id))])
+      const text = bulkResultMessage("入库", ok, failed)
+      if (failed.length > 0) toast.warning(text)
+      else toast.success(text)
+      router.refresh() // 待办/已处理两个页签的数据都来自服务端
+    } catch (err) {
+      toast.error(err?.message ?? "批量入库失败")
+    } finally {
+      setBusy(false)
+      setProgress(null)
+      setBulkOpen(false)
+    }
+  }
   // 页签 = 数据源 + 行态 + 空态文案；「管理」仅管理员可见
   const tabs = [
     {
@@ -43,20 +90,35 @@ export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`rounded-full px-3 py-1 text-sm transition-colors ${
-              tab === t.key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/60"
-            }`}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`rounded-full px-3 py-1 text-sm transition-colors ${
+                tab === t.key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/60"
+              }`}
+            >
+              {t.label}
+              {t.rows.length > 0 && <span className="ml-1 opacity-70">{t.rows.length}</span>}
+            </button>
+          ))}
+        </div>
+        {/* 一键入库：只在「我的待办」页签、且确有可入库任务时出现。
+            可入库 = 市级专家环节的内容任务（见 lib/review-workbench.js），组长/教师恒为 0 */}
+        {tab === "mine" && publishIds.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            title="把待办里市级专家环节的题目一次性通过：通过即入库、全市可见（等同逐题点「通过」）"
+            onClick={() => setBulkOpen(true)}
+            disabled={busy}
           >
-            {t.label}
-            {t.rows.length > 0 && <span className="ml-1 opacity-70">{t.rows.length}</span>}
-          </button>
-        ))}
+            <CheckCircle2Icon className="size-3.5" /> 一键入库（{publishIds.length}）
+          </Button>
+        )}
       </div>
 
       {current.rows.length === 0 ? (
@@ -67,6 +129,23 @@ export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage }) {
             <Row key={r.approval.id} r={r} {...current.rowProps} />
           ))}
         </div>
+      )}
+
+      {/* 批量确认（条件挂载）：进度写进确认按钮——几百条要跑一会儿 */}
+      {bulkOpen && (
+        <ConfirmDialog
+          title="一键入库？"
+          description={
+            `将把分配给您的 ${publishIds.length} 道待办一次性通过，通过后题目立即入库、全市教师可见。\n` +
+            `批量通过不附审批意见；需要写明意见的题目请逐题打开处理。`
+          }
+          confirmText={
+            busy ? `处理中… ${progress?.done ?? 0}/${progress?.total ?? 0}` : "确认入库"
+          }
+          busy={busy}
+          onConfirm={publishAll}
+          onClose={() => setBulkOpen(false)}
+        />
       )}
     </div>
   )

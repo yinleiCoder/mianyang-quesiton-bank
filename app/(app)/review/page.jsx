@@ -1,7 +1,7 @@
 // 审批收件箱：我的待办 + 已处理 + 管理员管理视图（学校管理员=本校；系统管理员=全量含待指派）
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
-import { loadInbox } from "@/lib/review-workbench"
+import { loadInbox, publishableIdsOf } from "@/lib/review-workbench"
 import { ReviewInbox } from "@/components/review/review-inbox"
 import { PageHeader } from "@/components/page-header"
 
@@ -18,6 +18,8 @@ export default async function ReviewPage() {
   )
 
   const canManage = ctx.isAdmin || ctx.isSchoolAdmin
+  // 可「一键入库」的待办（市级专家环节的内容任务）——组长/离线事件不在此列
+  const publishableIds = publishableIdsOf(mineRows)
 
   return (
     <div className="space-y-4">
@@ -29,7 +31,13 @@ export default async function ReviewPage() {
             : "逐题审阅后通过或退回（退回必填意见）；也可到题目详情发起转派。"
         }
       />
-      <ReviewInbox mineRows={mineRows} decidedRows={decidedRows} manageRows={manageRows} canManage={canManage} />
+      <ReviewInbox
+        mineRows={mineRows}
+        decidedRows={decidedRows}
+        manageRows={manageRows}
+        canManage={canManage}
+        publishableIds={publishableIds}
+      />
     </div>
   )
 }

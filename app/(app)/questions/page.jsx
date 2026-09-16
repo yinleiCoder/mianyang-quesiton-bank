@@ -2,6 +2,7 @@
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadMyQuestions } from "@/lib/question-workbench"
+import { loadMyPublishableIds } from "@/lib/review-workbench"
 import { MyQuestions } from "@/components/questions/my-questions"
 import { PageHeader } from "@/components/page-header"
 
@@ -11,7 +12,11 @@ export default async function MyQuestionsPage({ searchParams }) {
   const { status } = (await searchParams) ?? {}
   const ctx = await requireUser()
   const supabase = await createClient()
-  const { rows } = await loadMyQuestions(supabase, ctx.user.id)
+  // 两件事互不依赖：行数据（我的题）与待我入库的任务（专家账号才有，其余人恒为空）
+  const [{ rows }, publishableIds] = await Promise.all([
+    loadMyQuestions(supabase, ctx.user.id),
+    loadMyPublishableIds(supabase, ctx.user.id),
+  ])
 
   // 提交/撤回后的落地页签：status=返回版本状态 → 对应筛选
   const initialFilter = { pending_group: "pending", pending_city: "pending", returned: "returned" }[status] ?? "all"
@@ -28,7 +33,11 @@ export default async function MyQuestionsPage({ searchParams }) {
           </>
         }
       />
-      <MyQuestions initialRows={rows} initialFilter={initialFilter} />
+      <MyQuestions
+        initialRows={rows}
+        initialFilter={initialFilter}
+        publishableIds={publishableIds}
+      />
     </div>
   )
 }

@@ -19,7 +19,9 @@ import {
 } from "@/components/ui/sidebar";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { avatarUrl } from "@/lib/oss-url";
+import { ownRoleLabels } from "@/lib/roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -127,7 +129,6 @@ export function AppSidebar({
   isTeacher = true,
   identity = "teacher",
   openFeedback = 0,
-  roles,
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
@@ -140,19 +141,8 @@ export function AppSidebar({
     openFeedback,
   );
 
-  // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）
-  const roleLabels = [];
-  if (isAdmin) roleLabels.push("系统管理员");
-  if (isSchoolAdmin) roleLabels.push("学校管理员");
-  if (roleLabels.length === 0) {
-    roleLabels.push(
-      identity === "teacher_pending"
-        ? "教师（待审核）"
-        : identity === "student"
-          ? "学生"
-          : "教师",
-    );
-  }
+  // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）——文案见 lib/roles.js
+  const roleLabels = ownRoleLabels({ isAdmin, isSchoolAdmin, identity });
   const subtitle = [schoolName, roleLabels.join(" · ")]
     .filter(Boolean)
     .join(" / ");
@@ -266,6 +256,18 @@ export function AppSidebar({
                           {user.email}
                         </span>
                       </div>
+                    </div>
+                    {/* 角色：菜单项上方，与侧栏副标题同口径（ownRoleLabels） */}
+                    <div className="flex flex-wrap gap-1 px-1 pb-1.5">
+                      {roleLabels.map((label) => (
+                        <Badge
+                          key={label}
+                          variant="secondary"
+                          className="font-normal"
+                        >
+                          {label}
+                        </Badge>
+                      ))}
                     </div>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>

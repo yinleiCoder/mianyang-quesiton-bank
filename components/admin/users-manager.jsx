@@ -50,9 +50,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { TreePicker } from "@/components/admin/tree-picker"
 import { indexNodes } from "@/lib/subject-nodes"
 import { loadAdminUserDirectory } from "@/lib/admin-users"
+import { avatarUrl } from "@/lib/oss-url"
 import {
   Building2Icon,
   CrownIcon,
@@ -294,9 +296,11 @@ function UserRow({
       <TableRow>
         <TableCell>
           <div className="flex items-center gap-3">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">
-              {initial}
-            </div>
+            {/* 有头像就显示头像，没上传过才退回姓名首字（与侧栏/题库 chips 同一套 Avatar 组件） */}
+            <Avatar className="size-8 shrink-0">
+              {u.avatar_url && <AvatarImage src={avatarUrl(u.avatar_url)} alt={u.name || ""} />}
+              <AvatarFallback className="font-semibold">{initial}</AvatarFallback>
+            </Avatar>
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 truncate font-medium">
                 {u.name}

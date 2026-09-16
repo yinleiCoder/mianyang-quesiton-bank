@@ -84,7 +84,6 @@ async function AppSidebarData() {
       isTeacher={ctx.isTeacher}
       identity={ctx.identity}
       openFeedback={openFeedback}
-      roles={ctx.roles}
     />
   )
 }

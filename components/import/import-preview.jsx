@@ -6,6 +6,10 @@
 // 让教师在这里改，比让他到「我的题目」的 200 份草稿里找那 3 道错题便宜得多。
 // 入库走 import_questions_draft，**一次最多 25 道**（authenticated 角色的
 // statement_timeout 是 8s，几百题一个事务必然超时），所以这里自动分片。
+//
+// 每道题三态（对齐 import_job_items.status）：待定 pending / 不导入 skipped / 纳入 kept。
+// 三态都要在行上看得出来——skipped 原先没有任何标记，与 pending 长得一模一样，
+// 于是「不导入」一道没勾选的题就是一次看不见的操作，被当成按钮坏了。
 
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -19,7 +23,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ImportItemEditor } from "@/components/import/import-item-editor"
-import { CheckCircle2Icon, Loader2Icon, PencilIcon, Undo2Icon, XCircleIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  Loader2Icon,
+  PencilIcon,
+  RotateCcwIcon,
+  Undo2Icon,
+  XCircleIcon,
+} from "lucide-react"
 
 const CHUNK = 25
 
@@ -28,6 +39,8 @@ const FILTERS = [
   { key: "noanswer", label: "缺答案", match: (i) => needsAnswer(i) },
   { key: "flagged", label: "有提示", match: (i) => i.flags.length > 0 },
   { key: "imported", label: "已入库", match: (i) => i.status === "imported" },
+  // 「不导入」必须能筛：叉掉之后就只剩这个入口能把它们找回来
+  { key: "skipped", label: "不导入", match: (i) => i.status === "skipped" },
 ]
 
 // 「缺答案」= 入库会被拒的那一类（choices 没选 / 判断没值 / 填空没答 / 主观没参考 / 空位对不上）
@@ -230,9 +243,13 @@ export function ImportPreview({ job, items, onRefresh }) {
         )}
         {list.map((it) => {
           const kept = it.status === "kept" || it.status === "imported"
+          const skipped = it.status === "skipped"
           const issues = draftIssues(it.qtype, it.content)
           return (
-            <div key={it.id} className="rounded-xl border p-3">
+            <div
+              key={it.id}
+              className={`rounded-xl border p-3 ${skipped ? "border-dashed bg-muted/30" : ""}`}
+            >
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <input
                   type="checkbox"
@@ -276,6 +293,11 @@ export function ImportPreview({ job, items, onRefresh }) {
                 {it.status === "imported" && (
                   <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">已入库</span>
                 )}
+                {/* skipped 没有这个标记时与「待定」长得一模一样：叉掉一道没勾选的题，
+                    界面上什么都不会变，看起来就是"点了没反应" */}
+                {skipped && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">不导入</span>
+                )}
                 {it.status === "failed" && (
                   <span className="rounded bg-rose-100 px-1.5 py-0.5 text-rose-700" title={it.error ?? ""}>
                     入库失败
@@ -301,14 +323,20 @@ export function ImportPreview({ job, items, onRefresh }) {
                   >
                     {editing === it.id ? <Undo2Icon className="size-3.5" /> : <PencilIcon className="size-3.5" />}
                   </Button>
+                  {/* 可逆的一对：再点一次回到「待定」。单向的话，对一道已经跳过的题
+                      就是一次静默空操作（库里的行没变、界面也没变）——正是"点了没反应"的来源 */}
                   {it.status !== "imported" && (
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      title="不导入这道题"
-                      onClick={() => setStatus([it.id], "skipped")}
+                      title={skipped ? "取消「不导入」，回到待定" : "不导入这道题"}
+                      onClick={() => setStatus([it.id], skipped ? "pending" : "skipped")}
                     >
-                      <XCircleIcon className="size-3.5" />
+                      {skipped ? (
+                        <RotateCcwIcon className="size-3.5" />
+                      ) : (
+                        <XCircleIcon className="size-3.5" />
+                      )}
                     </Button>
                   )}
                 </span>

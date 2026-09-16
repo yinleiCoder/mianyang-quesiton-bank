@@ -1,8 +1,9 @@
-// 个人资料：头像（OSS avatars/…）、姓名、邮箱（经 Supabase Auth 更换）、绑定学校。
+// 个人资料：头像（OSS avatars/…）、姓名、邮箱（经 Supabase Auth 更换）、绑定学校、角色（只读）。
 // 写路径全部收口：update_own_profile RPC（姓名/学校/头像）与 auth.updateUser（邮箱）；
 // 邮箱变更由 0019 触发器镜像到 profiles.email。
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
+import { ownRoleLabels } from "@/lib/roles"
 import { ProfileEditor } from "@/components/profile/profile-editor"
 import { PageHeader } from "@/components/page-header"
 
@@ -29,6 +30,7 @@ export default async function ProfilePage() {
       <ProfileEditor
         userId={ctx.user.id}
         email={ctx.user.email}
+        roles={ownRoleLabels(ctx)}
         initial={{
           name: profile?.name ?? "",
           schoolId: profile?.school_id ?? null,
