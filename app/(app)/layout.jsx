@@ -5,6 +5,7 @@ import { requireSession, requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadSchools, schoolNameOf } from "@/lib/reference-data"
 import { loadOpenFeedbackCount } from "@/lib/feedback"
+import { AppBreadcrumb } from "@/components/app-breadcrumb"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Sidebar,
@@ -38,9 +39,7 @@ export default async function AppLayout({ children }) {
             orientation="vertical"
             className="mr-2 data-vertical:h-4 data-vertical:self-auto"
           />
-          <span className="text-sm font-medium text-muted-foreground">
-            绵阳市中职共建题库
-          </span>
+          <AppBreadcrumb />
         </header>
         <main className="flex flex-1 flex-col gap-6 p-4 lg:p-6">{children}</main>
       </SidebarInset>
@@ -58,15 +57,33 @@ async function AppSidebarData() {
   // 学校名走缓存的参考数据：每个页面都要用的一份名单，不该每次页面加载都打一次往返。
   let schoolName = null
   let openFeedback = 0
+  let openReviews = 0
   if (profile?.school_id) {
     schoolName = schoolNameOf(await loadSchools(), profile.school_id)
   }
-  if (ctx.isAdmin) {
-    // 角标是装饰性的：查询失败不该让所有页面跟着进错误边界，退回 0 即可
+  // 两个角标（反馈收件箱 / 我的待办）是装饰性的：查询失败不该让所有页面跟着进错误边界，退回 0 即可
+  const needsCounts = ctx.isAdmin || ctx.isApprover || ctx.isSchoolAdmin
+  if (needsCounts) {
+    const supabase = await createClient()
+    // 审批收件箱角标（Gmail 式）＝ 分给我的待处理审批任务数。只取 count、不取行：
+    // 走 idx_approvals_inbox 那条部分索引，比拉一遍列表便宜得多。
+    // 组长/专家/管理员之外的账号没有这条导航，也就不查。
     try {
-      openFeedback = await loadOpenFeedbackCount(await createClient())
+      const { count } = await supabase
+        .from("approvals")
+        .select("id", { count: "exact", head: true })
+        .eq("assigned_user_id", ctx.user.id)
+        .eq("state", "waiting")
+      openReviews = count ?? 0
     } catch {
-      openFeedback = 0
+      openReviews = 0
+    }
+    if (ctx.isAdmin) {
+      try {
+        openFeedback = await loadOpenFeedbackCount(supabase)
+      } catch {
+        openFeedback = 0
+      }
     }
   }
 
@@ -84,6 +101,7 @@ async function AppSidebarData() {
       isTeacher={ctx.isTeacher}
       identity={ctx.identity}
       openFeedback={openFeedback}
+      openReviews={openReviews}
     />
   )
 }

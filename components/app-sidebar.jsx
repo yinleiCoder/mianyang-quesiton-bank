@@ -56,6 +56,7 @@ function useNavItems(
   isApprover,
   isTeacher,
   openFeedback = 0,
+  openReviews = 0,
 ) {
   // 主菜单随里程碑追加：M4 审批收件箱（组长/专家/管理员见）、M5 全市题库
   // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
@@ -71,7 +72,13 @@ function useNavItems(
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
   ];
   if (isAdmin || isSchoolAdmin || isApprover) {
-    main.push({ title: "审批收件箱", url: "/review", icon: InboxIcon });
+    // 角标＝分给我待处理的任务数（Gmail 式），处理完 router.refresh() 会重算
+    main.push({
+      title: "审批收件箱",
+      url: "/review",
+      icon: InboxIcon,
+      badge: openReviews,
+    });
   }
   // 管理台：系统管理员全量；学校管理员仅「本校用户与任命」
   const admin = [];
@@ -129,6 +136,7 @@ export function AppSidebar({
   isTeacher = true,
   identity = "teacher",
   openFeedback = 0,
+  openReviews = 0,
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
@@ -139,6 +147,7 @@ export function AppSidebar({
     isApprover,
     isTeacher,
     openFeedback,
+    openReviews,
   );
 
   // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）——文案见 lib/roles.js

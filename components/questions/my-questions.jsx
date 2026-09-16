@@ -4,6 +4,7 @@
 // 数据自管理：SSR seed + 操作后浏览器重查。
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { statusChip } from "@/lib/question-model"
@@ -74,6 +75,7 @@ const CONFIRM_TEXT = {
 }
 
 export function MyQuestions({ initialRows, initialFilter = "all", publishableIds = [] }) {
+  const router = useRouter()
   const [rows, setRows] = useState(initialRows)
   const [filter, setFilter] = useState(initialFilter)
   const [pending, setPending] = useState(null) // {kind, row}
@@ -165,6 +167,8 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
       } else {
         // 只有通过的才摘掉：失败的点开还能看到原因
         setProcessed((prev) => [...prev, ...ids.filter((id) => !failedIds.has(id))])
+        // 侧栏「审批收件箱」的待办角标要跟着减；本页行数据是自己的题，不受影响
+        router.refresh()
       }
       const label = kind === "submit" ? "提交" : "入库"
       const text = bulkResultMessage(label, ok, failed)
