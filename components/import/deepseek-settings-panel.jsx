@@ -8,7 +8,7 @@
 // 密钥只存在使用者自己的浏览器（localStorage），请求从浏览器直达 DeepSeek。
 // 所以必须说清两件事：费用由填密钥的人承担；同一台电脑的其他人能看到它。
 
-import * as React from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import {
   setDeepSeekKey,
@@ -28,10 +28,10 @@ import { KeyRoundIcon, Trash2Icon, CheckCircle2Icon, Loader2Icon } from "lucide-
 export function DeepSeekSettingsPanel({ onChange, compact = false }) {
   // 设置只在浏览器里，读到之前不能渲染真实分支（否则 hydration 对不上）
   const { masked: saved, model, ready, refresh } = useDeepSeekPrefs()
-  const [value, setValue] = React.useState("")
-  const [editing, setEditing] = React.useState(false)
-  const [testing, setTesting] = React.useState(false)
-  const [tested, setTested] = React.useState(null) // {ok, message}
+  const [value, setValue] = useState("")
+  const [editing, setEditing] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [tested, setTested] = useState(null) // {ok, message}
 
   function save() {
     const v = normalizeKeyInput(value)

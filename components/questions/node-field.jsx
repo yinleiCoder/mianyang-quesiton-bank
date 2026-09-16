@@ -1,7 +1,7 @@
 "use client"
 
 // 题目所属课程节点选择：可挂题节点（公共-学科 / 专业-课程）且未冻结才可选。
-import * as React from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TreePicker } from "@/components/admin/tree-picker"
@@ -9,7 +9,7 @@ import { isAttachable, kindLabel, nodePathOf } from "@/lib/subject-nodes"
 import { FolderTreeIcon } from "lucide-react"
 
 export function NodeField({ nodes, value, onChange }) {
-  const [open, setOpen] = React.useState(false)
+  const [open, setOpen] = useState(false)
   const selected = value ? nodes.find((n) => n.id === value) : null
 
   const canPick = (node) => isAttachable(node.kind) && !node.is_frozen

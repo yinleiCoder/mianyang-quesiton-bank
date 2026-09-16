@@ -7,7 +7,7 @@
 // 入库走 import_questions_draft，**一次最多 25 道**（authenticated 角色的
 // statement_timeout 是 8s，几百题一个事务必然超时），所以这里自动分片。
 
-import * as React from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { FLAG_LABELS } from "@/lib/import-jobs"
@@ -51,10 +51,10 @@ function answerText(content) {
 }
 
 export function ImportPreview({ job, items, onRefresh }) {
-  const [filter, setFilter] = React.useState("all")
-  const [editing, setEditing] = React.useState(null) // item id（条件挂载用）
-  const [busy, setBusy] = React.useState(false)
-  const [progress, setProgress] = React.useState(null)
+  const [filter, setFilter] = useState("all")
+  const [editing, setEditing] = useState(null) // item id（条件挂载用）
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(null)
   // 乐观状态：id → status，勾选/取消**先落本地**。
   //
   // 为什么必须有：复选框的 checked 来自服务端的 status，而 React 处理完 change 事件后会把
@@ -62,11 +62,11 @@ export function ImportPreview({ job, items, onRefresh }) {
   // change 都跑）。于是"写库成功 → 父组件重新拉题 → 才勾上"这条链路上，勾选框会先弹回原样，
   // 看起来就是**单击没反应**；再点一下时刷新恰好回来了，才勾上。刷新本身还有 1.2s 节流
   // （import-page），被吞掉时就是一直不勾上。
-  const [optimistic, setOptimistic] = React.useState({})
+  const [optimistic, setOptimistic] = useState({})
 
   // 服务端数据追上乐观值后撤掉覆盖。不在这里主动清：刷新可能被节流延后，清早了勾选会闪回去；
   // 等 items 真的变成这个值再撤，界面才是单调的
-  React.useEffect(() => {
+  useEffect(() => {
     setOptimistic((prev) => {
       const ids = Object.keys(prev)
       if (ids.length === 0) return prev
@@ -86,16 +86,16 @@ export function ImportPreview({ job, items, onRefresh }) {
   }, [items])
 
   // 渲染、计数、入库都看这一份：界面上的勾、"已勾选 N 道"、真正提交的 id 不能各说各话
-  const view = React.useMemo(() => {
+  const view = useMemo(() => {
     if (Object.keys(optimistic).length === 0) return items
     return items.map((i) =>
       optimistic[i.id] !== undefined && optimistic[i.id] !== i.status ? { ...i, status: optimistic[i.id] } : i
     )
   }, [items, optimistic])
 
-  const list = React.useMemo(() => view.filter(FILTERS.find((f) => f.key === filter).match), [view, filter])
+  const list = useMemo(() => view.filter(FILTERS.find((f) => f.key === filter).match), [view, filter])
   // 默认全部保留；缺答案的不勾（入库必然被 DB 拒），但教师可以手动勾上作为"待补"占位
-  const keptIds = React.useMemo(
+  const keptIds = useMemo(
     () => view.filter((i) => i.status === "kept" || i.status === "imported").map((i) => i.id),
     [view]
   )

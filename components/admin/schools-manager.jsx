@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { EmptyState } from "@/components/empty-state"
@@ -42,12 +42,12 @@ import { PlusIcon, Loader2Icon, Building2Icon } from "lucide-react"
 
 export function SchoolsManager({ schools }) {
   // 数据自管理：初始值 SSR，操作成功后浏览器端重查刷新（不依赖 router.refresh）
-  const [list, setList] = React.useState(schools)
-  const [creating, setCreating] = React.useState(false)
-  const [name, setName] = React.useState("")
-  const [code, setCode] = React.useState("")
-  const [pending, setPending] = React.useState(null) // 停用/启用的学校 id
-  const [toggling, setToggling] = React.useState(false)
+  const [list, setList] = useState(schools)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState("")
+  const [code, setCode] = useState("")
+  const [pending, setPending] = useState(null) // 停用/启用的学校 id
+  const [toggling, setToggling] = useState(false)
 
   async function refreshList() {
     const supabase = createClient()

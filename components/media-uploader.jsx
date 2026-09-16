@@ -5,7 +5,7 @@
 //   · question_media：图片 ≤20MB、音频 ≤200MB、视频 ≤1GB、文档 ≤200MB，成功后调 register_media 登记；
 //   · avatar：图片 ≤5MB，不登记（头像只写 profiles.avatar_url，避免 GC 误删）。
 // 上传成功回调 onUploaded({ key, bucket, size, mime, kind, name })，由调用方决定写入位置。
-import * as React from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useDropzone } from "react-dropzone"
 import { toast } from "sonner"
 import { cn } from "cn"
@@ -51,15 +51,15 @@ export function MediaUploaderDialog({
   title = purpose === "avatar" ? "更换头像" : "插入图片 / 音视频 / 文件",
   description,
 }) {
-  const [file, setFile] = React.useState(null)
-  const [previewUrl, setPreviewUrl] = React.useState(null) // 本地预览（文件可能尚未上传）
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState("")
-  const [done, setDone] = React.useState(false)
+  const [file, setFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState(null) // 本地预览（文件可能尚未上传）
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const [done, setDone] = useState(false)
 
   // 预览地址随所选文件的生命周期管理：换文件/清空/卸载时释放上一张。
   // 副作用只能放 effect——setState 的 updater 必须是纯函数（StrictMode 下会被重复调用）。
-  React.useEffect(() => {
+  useEffect(() => {
     if (!file || !file.type.startsWith("image/")) {
       setPreviewUrl(null)
       return
@@ -69,17 +69,17 @@ export function MediaUploaderDialog({
     return () => URL.revokeObjectURL(url)
   }, [file])
 
-  const reset = React.useCallback(() => {
+  const reset = useCallback(() => {
     setFile(null)
     setError("")
     setDone(false)
   }, [])
 
-  const accept = React.useMemo(() => acceptMap(purpose), [purpose])
+  const accept = useMemo(() => acceptMap(purpose), [purpose])
 
   // 分档校验只能走 validator：react-dropzone 的 maxSize 是单一数值，表达不了「图片 20MB / 视频 1GB」。
   // 返回的 message 与服务端 400 的文案同源（tooLargeMessage），两边不会各说各话。
-  const validate = React.useCallback(
+  const validate = useCallback(
     (f) => {
       const tier = tierFor(purpose, f.type)
       if (!tier) return { code: "file-invalid-type", message: "不支持的文件类型" }
@@ -115,7 +115,7 @@ export function MediaUploaderDialog({
   })
 
   // 打开对话框时重置内部状态（首屏不残留上次文件）
-  React.useEffect(() => {
+  useEffect(() => {
     if (open) reset()
   }, [open, reset])
 

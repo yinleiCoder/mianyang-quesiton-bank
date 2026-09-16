@@ -4,7 +4,8 @@ import Link from "next/link"
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { qtypeLabel, difficultyLabel } from "@/lib/question-model"
-import { subjectNodesQuery, indexNodes } from "@/lib/subject-nodes"
+import { indexNodes } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
 import { QuestionReader } from "@/components/bank/question-reader"
@@ -36,20 +37,20 @@ export default async function BankQuestionPage({ params }) {
     )
   }
 
-  const [vRes, nodesRes, schoolRes, tagRes, apprRes] = await Promise.all([
+  const [vRes, nodes, schoolRes, tagRes, apprRes] = await Promise.all([
     supabase
       .from("question_versions")
       .select("id, version_no, change_type, qtype, difficulty, content, published_at, created_by")
       .eq("id", q.current_published_version_id)
       .single(),
-    subjectNodesQuery(supabase),
+    loadSubjectNodes(),
     supabase.from("schools").select("id, name").eq("id", q.school_id).maybeSingle(),
     supabase.from("version_tags").select("tag_name").eq("version_id", q.current_published_version_id),
     supabase.rpc("bank_reviewers", { p_version_ids: [q.current_published_version_id] }),
   ])
-  for (const r of [vRes, nodesRes, schoolRes, tagRes, apprRes]) if (r.error) throw r.error
+  for (const r of [vRes, schoolRes, tagRes, apprRes]) if (r.error) throw r.error
   const v = vRes.data
-  const { pathOf: nodePath } = indexNodes(nodesRes.data)
+  const { pathOf: nodePath } = indexNodes(nodes)
   const tags = (tagRes.data ?? []).map((t) => t.tag_name)
   const schoolName = schoolRes.data?.name ?? ""
 

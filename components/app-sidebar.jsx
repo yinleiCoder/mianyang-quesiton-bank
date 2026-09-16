@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "@/lib/actions/auth";
@@ -131,7 +131,7 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
-  const [feedbackOpen, setFeedbackOpen] = React.useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const { main: navItems, admin: adminItems } = useNavItems(
     isAdmin,
     isSchoolAdmin,

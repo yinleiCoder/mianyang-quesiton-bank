@@ -1,8 +1,8 @@
 // 出题（新题目）：需已绑定学校（RPC 兜底），且科目树有可挂题节点
 import Link from "next/link"
 import { requireUser } from "@/lib/auth"
-import { createClient } from "@/lib/supabase/server"
-import { isAttachable, subjectNodesQuery } from "@/lib/subject-nodes"
+import { isAttachable } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { QuestionEditor } from "@/components/questions/question-editor"
 import { EmptyState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
@@ -22,10 +22,8 @@ export default async function NewQuestionPage() {
       />
     )
   }
-  const supabase = await createClient()
   // 查询失败要抛出：否则会误报成「科目树还没有可挂题的节点」
-  const { data: nodes, error } = await subjectNodesQuery(supabase)
-  if (error) throw error
+  const nodes = await loadSubjectNodes()
 
   const attachable = (nodes ?? []).filter(
     (n) => isAttachable(n.kind) && !n.is_frozen

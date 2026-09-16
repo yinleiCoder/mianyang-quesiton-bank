@@ -2,7 +2,7 @@
 
 // 人员 chip：头像 + 姓名（可带角色前缀），点击在光标附近弹出个人资料浮层。
 // person 为 null 时渲染灰色"已注销"占位（无交互）；浮层信息来自服务端下发的快照，不再发请求。
-import * as React from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { avatarUrl } from "@/lib/oss-url"
 import { Building2Icon, MailIcon } from "lucide-react"
@@ -12,7 +12,7 @@ const initialOf = (name) => ((name || "?").trim().charAt(0) || "?").toUpperCase(
 
 // 迷你圆形头像：有 url 显示图片（加载失败自动回落），否则显示姓名首字
 function Face({ url, name, className }) {
-  const [err, setErr] = React.useState(false)
+  const [err, setErr] = useState(false)
   const showImg = Boolean(url) && !err
   return (
     <span
@@ -35,15 +35,15 @@ function Face({ url, name, className }) {
 }
 
 export function PersonChip({ person, caption, className }) {
-  const [open, setOpen] = React.useState(false)
-  const [pos, setPos] = React.useState(null)
-  const btnRef = React.useRef(null)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
 
-  const close = React.useCallback(() => {
+  const close = useCallback(() => {
     setOpen(false)
   }, [])
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!open) return
     const onKey = (e) => {
       if (e.key === "Escape") close()

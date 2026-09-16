@@ -7,7 +7,7 @@
 // 重新打开历史任务（?job=xxx）时文件当然已经不在，工作台会提示重新选择同一份文件，
 // 已解析的页不会重跑（进度在数据库里）。
 
-import * as React from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -22,15 +22,15 @@ import { Loader2Icon, FilesIcon, ListChecksIcon, Trash2Icon } from "lucide-react
 
 export function ImportPage({ nodes, jobs, initial }) {
   const router = useRouter()
-  const fileRef = React.useRef(null) // 文件 handle（不可序列化，只能放 ref）
-  const fileInputRef = React.useRef(null)
+  const fileRef = useRef(null) // 文件 handle（不可序列化，只能放 ref）
+  const fileInputRef = useRef(null)
 
-  const [job, setJob] = React.useState(initial?.job ?? null)
-  const [pages, setPages] = React.useState(initial?.pages ?? [])
-  const [items, setItems] = React.useState(initial?.items ?? [])
-  const [tab, setTab] = React.useState("run")
-  const [loading, setLoading] = React.useState(false)
-  const [discardOpen, setDiscardOpen] = React.useState(false)
+  const [job, setJob] = useState(initial?.job ?? null)
+  const [pages, setPages] = useState(initial?.pages ?? [])
+  const [items, setItems] = useState(initial?.items ?? [])
+  const [tab, setTab] = useState("run")
+  const [loading, setLoading] = useState(false)
+  const [discardOpen, setDiscardOpen] = useState(false)
 
   /**
    * **就地合并进度**（跑批期间的主力）：认领页与落库两个 RPC 都会带回新的状态，
@@ -38,7 +38,7 @@ export function ImportPage({ nodes, jobs, initial }) {
    * （那些请求曾压到 PostgREST 的内部连接池，撞出 PGRST003）。
    * 只有收尾、以及用户手动重试/跳过页时才真正去查（见 refresh）。
    */
-  const applyProgress = React.useCallback(({ pages: changed, job: jobPatch } = {}) => {
+  const applyProgress = useCallback(({ pages: changed, job: jobPatch } = {}) => {
     if (changed?.length) {
       const byNo = new Map(changed.map((p) => [p.page_no, p]))
       setPages((list) => list.map((p) => (byNo.has(p.page_no) ? { ...p, ...byNo.get(p.page_no) } : p)))
@@ -48,22 +48,22 @@ export function ImportPage({ nodes, jobs, initial }) {
 
   // 任务 id 放 ref：刷新函数要能保持稳定的引用（跑批循环会长期持有它），
   // 同时不因 job.id 变化而重建
-  const jobIdRef = React.useRef(null)
+  const jobIdRef = useRef(null)
   jobIdRef.current = job?.id ?? null
-  const refreshingRef = React.useRef(false)
-  const dirtyRef = React.useRef(false)
-  const lastRefreshRef = React.useRef(0)
-  const timerRef = React.useRef(null)
+  const refreshingRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const lastRefreshRef = useRef(0)
+  const timerRef = useRef(null)
 
   // 卸载时把延后的那次刷新取消掉（别对着已卸载的组件 setState）
-  React.useEffect(() => () => clearTimeout(timerRef.current), [])
+  useEffect(() => () => clearTimeout(timerRef.current), [])
 
   /**
    * 真正去查库的那一段（节流与排队在 refresh 里）。单独拆出来是为了让 refresh 能被
    * 定时器延后调用而不必自引用——React Compiler 遇到自引用的记忆化会整个放弃。
    * withItems=false 时只刷任务与页（跑批中够用，题列表跑完再拉，那个查询重得多）。
    */
-  const runRefresh = React.useCallback(async (withItems) => {
+  const runRefresh = useCallback(async (withItems) => {
     const id = jobIdRef.current
     if (!id) return
     if (refreshingRef.current) {
@@ -103,7 +103,7 @@ export function ImportPage({ nodes, jobs, initial }) {
    *      未处理的 rejection，Next 的覆盖层会显示成没头没脑的 [object Object]。
    *      PostgrestError 是普通对象不是 Error，所以必须自己兜住而不是指望错误页。
    */
-  const refresh = React.useCallback(
+  const refresh = useCallback(
     (withItems = true) => {
       if (!jobIdRef.current) return
       // 节流：距上次刷新不足 1.2 秒就**推迟**到窗口结束再刷（进度晚一两秒没关系，

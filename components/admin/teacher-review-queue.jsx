@@ -3,7 +3,7 @@
 // 教师身份审核队列（0025）：注册时选「教师」的账号在此审核。
 // 系统管理员可审全校；学校管理员仅能审本校（DB 侧 review_teacher_identity 有断言兜底）。
 // 通过 → profiles.identity='teacher'（获得出题/审批等教师权限）；驳回 → 'student'（仅刷题）。
-import * as React from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -13,7 +13,7 @@ import { Loader2Icon, ShieldCheckIcon } from "lucide-react"
 
 export function TeacherReviewQueue({ pendingUsers = [] }) {
   const router = useRouter()
-  const [busy, setBusy] = React.useState("")
+  const [busy, setBusy] = useState("")
 
   async function decide(userId, approve) {
     setBusy(`${userId}:${approve ? "y" : "n"}`)

@@ -1,7 +1,7 @@
 "use client"
 
 // 审批收件箱：我的待办（组长/专家环节统一）→ 处理入口到详情页；管理员多一个"管理"页签（可看全任务/待指派）。
-import * as React from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { approvalStateChip } from "@/lib/admin-records"
 import { fmtDateTime24 } from "@/lib/format"
@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/empty-state"
 import { ArrowRightIcon, CheckCircle2Icon, CircleSlash2Icon, InboxIcon, RotateCcwIcon } from "lucide-react"
 
 export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage }) {
-  const [tab, setTab] = React.useState("mine")
+  const [tab, setTab] = useState("mine")
   // 页签 = 数据源 + 行态 + 空态文案；「管理」仅管理员可见
   const tabs = [
     {

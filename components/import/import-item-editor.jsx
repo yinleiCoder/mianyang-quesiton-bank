@@ -9,7 +9,7 @@
 // React Compiler 会把常挂载组件里被记忆化闭包捕获的 state.prop 提到渲染期求值，
 // item 为 null 时首渲染就崩。
 
-import * as React from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { blocksToPlain, textToBlocks, draftIssues } from "@/lib/import-pipeline"
@@ -27,20 +27,20 @@ const stillNeedsAnswer = (qtype, content) =>
   draftIssues(qtype, content).some((s) => s.includes("答案") || s.includes("空位"))
 
 export function ImportItemEditor({ item, onClose, onSaved }) {
-  const [qtype, setQtype] = React.useState(item.qtype)
-  const [difficulty, setDifficulty] = React.useState(item.difficulty)
-  const [stem, setStem] = React.useState(() => blocksToPlain(item.content?.stem))
-  const [options, setOptions] = React.useState(() =>
+  const [qtype, setQtype] = useState(item.qtype)
+  const [difficulty, setDifficulty] = useState(item.difficulty)
+  const [stem, setStem] = useState(() => blocksToPlain(item.content?.stem))
+  const [options, setOptions] = useState(() =>
     (item.content?.options ?? []).map((o) => ({ key: o.key, text: blocksToPlain(o.label) }))
   )
-  const [answer, setAnswer] = React.useState(() => ({
+  const [answer, setAnswer] = useState(() => ({
     keys: [...(item.content?.answer?.keys ?? [])],
     value: item.content?.answer?.value ?? true,
     values: [...(item.content?.answer?.values ?? [])],
     samples: (item.content?.answer?.samples ?? []).join("\n"),
   }))
-  const [analysis, setAnalysis] = React.useState(() => blocksToPlain(item.content?.analysis))
-  const [busy, setBusy] = React.useState(false)
+  const [analysis, setAnalysis] = useState(() => blocksToPlain(item.content?.analysis))
+  const [busy, setBusy] = useState(false)
 
   function buildContent() {
     const content = { format_version: 1, stem: textToBlocks(stem) }

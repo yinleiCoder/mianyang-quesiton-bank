@@ -1,4 +1,3 @@
-import * as React from "react"
 import { cn } from "cn"
 
 // 支持 minRows（最小可见行数 → 最小高度）：正文用 field-sizing:content 自动随内容增高，

@@ -3,7 +3,7 @@
 // 意见反馈收件箱（系统管理员）：逐条查看 + 标记已处理 / 重新打开。
 // 筛选在服务端做（?status=，见 app/(app)/admin/feedback/page.jsx），这里只管动作；
 // 动作成功后 router.refresh()：列表与侧栏「未处理」角标一起刷新。
-import * as React from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -30,9 +30,9 @@ import { CheckCircle2Icon, Loader2Icon, RotateCcwIcon } from "lucide-react"
 
 export function FeedbackInbox({ rows }) {
   const router = useRouter()
-  const [target, setTarget] = React.useState(null) // { id, nextStatus }
-  const [note, setNote] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const [target, setTarget] = useState(null) // { id, nextStatus }
+  const [note, setNote] = useState("")
+  const [busy, setBusy] = useState(false)
 
   async function handleConfirm() {
     if (!target) return

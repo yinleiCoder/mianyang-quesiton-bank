@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { EmptyState } from "@/components/empty-state"
@@ -79,20 +79,20 @@ export function UsersManager({
   caller,
 }) {
   // 数据自管理：初始值由服务端传入（SSR 首屏），操作成功后浏览器端重查（不依赖 router.refresh）
-  const [users, setUsers] = React.useState(initialUsers)
-  const [schools, setSchools] = React.useState(initialSchools)
-  const [roleRows, setRoleRows] = React.useState(initialRoleRows)
-  const [assignments, setAssignments] = React.useState(initialAssignments)
-  const [nodes, setNodes] = React.useState(initialNodes)
-  const [q, setQ] = React.useState("")
+  const [users, setUsers] = useState(initialUsers)
+  const [schools, setSchools] = useState(initialSchools)
+  const [roleRows, setRoleRows] = useState(initialRoleRows)
+  const [assignments, setAssignments] = useState(initialAssignments)
+  const [nodes, setNodes] = useState(initialNodes)
+  const [q, setQ] = useState("")
 
-  const schoolMap = React.useMemo(() => new Map(schools.map((s) => [s.id, s])), [schools])
-  const schoolAdmins = React.useMemo(
+  const schoolMap = useMemo(() => new Map(schools.map((s) => [s.id, s])), [schools])
+  const schoolAdmins = useMemo(
     () => new Set(roleRows.filter((r) => r.role === SCHOOL_ADMIN_ROLE).map((r) => r.user_id)),
     [roleRows]
   )
 
-  const filtered = React.useMemo(() => {
+  const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
     if (!s) return users
     return users.filter(
@@ -202,22 +202,22 @@ function UserRow({
   canAssignLeader,
   canAssignExpert,
 }) {
-  const [bindOpen, setBindOpen] = React.useState(false)
-  const [bindSchool, setBindSchool] = React.useState("")
-  const [bindBusy, setBindBusy] = React.useState(false)
-  const [saConfirm, setSaConfirm] = React.useState(false)
-  const [saBusy, setSaBusy] = React.useState(false)
-  const [picker, setPicker] = React.useState(null) // { role: 'group_leader' | 'city_expert' } 或 null
-  const [revokeId, setRevokeId] = React.useState(null)
-  const [revokeBusy, setRevokeBusy] = React.useState(false)
-  const [delOpen, setDelOpen] = React.useState(false)
-  const [delBusy, setDelBusy] = React.useState(false)
-  const [busyAction, setBusyAction] = React.useState("")
+  const [bindOpen, setBindOpen] = useState(false)
+  const [bindSchool, setBindSchool] = useState("")
+  const [bindBusy, setBindBusy] = useState(false)
+  const [saConfirm, setSaConfirm] = useState(false)
+  const [saBusy, setSaBusy] = useState(false)
+  const [picker, setPicker] = useState(null) // { role: 'group_leader' | 'city_expert' } 或 null
+  const [revokeId, setRevokeId] = useState(null)
+  const [revokeBusy, setRevokeBusy] = useState(false)
+  const [delOpen, setDelOpen] = useState(false)
+  const [delBusy, setDelBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState("")
 
   const isSchoolAdminNow = schoolAdmins.has(u.user_id)
   const activeSchools = [...schoolMap.values()].filter((s) => s.is_active)
   const initial = (u.name || "?").slice(0, 1)
-  const pathOf = React.useMemo(() => indexNodes(nodes).pathOf, [nodes])
+  const pathOf = useMemo(() => indexNodes(nodes).pathOf, [nodes])
 
   // 停用权限同样按分工：专家→系统管理员；组长→该校学校管理员
   const revocable = assignments.filter((a) => {

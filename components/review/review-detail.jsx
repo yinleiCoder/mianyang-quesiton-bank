@@ -2,7 +2,7 @@
 
 // 钉钉式审批详情：步骤条（提交→组长→专家→入库）＋ 历史时间线 ＋ 题目全量渲染（含答案）
 // ＋ 决策动作（通过/退回必填意见/转派）。退回后作者修改可重提 → 全链重启，历史步骤以时间线呈现。
-import * as React from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -99,11 +99,11 @@ export function ReviewDetail({ data }) {
   const router = useRouter()
   const a = data.approval
   const v = data.version
-  const [busy, setBusy] = React.useState("") // "" | pass | return | transfer
-  const [returnOpen, setReturnOpen] = React.useState(false)
-  const [transferOpen, setTransferOpen] = React.useState(false)
-  const [comment, setComment] = React.useState("")
-  const [targetId, setTargetId] = React.useState("")
+  const [busy, setBusy] = useState("") // "" | pass | return | transfer
+  const [returnOpen, setReturnOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [comment, setComment] = useState("")
+  const [targetId, setTargetId] = useState("")
 
   // 打开退回对话框时重置意见
   const openReturn = () => {

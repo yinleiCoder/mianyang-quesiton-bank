@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -40,11 +40,11 @@ function Row({ entry, depth, canPick, onPick }) {
 // 树形节点选择器：公共/专业两棵静态树，点击行回调所选节点
 // pickable：可选谓词（默认全部可选）；false 的节点置灰不可点（出题时仅可挂题节点可选）
 export function TreePicker({ open, onOpenChange, nodes, onSelect, pickable, title = "选择科目节点", hint }) {
-  const trees = React.useMemo(() => buildTrees(nodes), [nodes])
-  const [scopeTab, setScopeTab] = React.useState(null)
+  const trees = useMemo(() => buildTrees(nodes), [nodes])
+  const [scopeTab, setScopeTab] = useState(null)
   const canPick = pickable ?? (() => true)
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (open) setScopeTab(null)
   }, [open])
 

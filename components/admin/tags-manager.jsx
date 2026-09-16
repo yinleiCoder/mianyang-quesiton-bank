@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { EmptyState } from "@/components/empty-state"
@@ -51,12 +51,12 @@ const normalizeTag = (row) => ({ ...row, usage: row.version_tags?.[0]?.count ?? 
 
 export function TagsManager({ tags: initialTags }) {
   // 数据自管理：初始值 SSR，操作成功后浏览器端重查（不依赖 router.refresh）
-  const [tags, setTags] = React.useState(() => initialTags.map(normalizeTag))
-  const [busy, setBusy] = React.useState(false)
-  const [renameTag, setRenameTag] = React.useState(null)
-  const [renameValue, setRenameValue] = React.useState("")
-  const [mergeTag, setMergeTag] = React.useState(null)
-  const [mergeTarget, setMergeTarget] = React.useState("")
+  const [tags, setTags] = useState(() => initialTags.map(normalizeTag))
+  const [busy, setBusy] = useState(false)
+  const [renameTag, setRenameTag] = useState(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [mergeTag, setMergeTag] = useState(null)
+  const [mergeTarget, setMergeTarget] = useState("")
 
   async function refreshList() {
     const supabase = createClient()

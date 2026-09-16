@@ -8,7 +8,8 @@ import { QuestionEditor } from "@/components/questions/question-editor"
 import { PageHeader } from "@/components/page-header"
 import { fromContent } from "@/lib/question-model"
 import { INFLIGHT } from "@/lib/question-workbench"
-import { indexNodes, subjectNodesQuery } from "@/lib/subject-nodes"
+import { indexNodes } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { fmtDateTime24 } from "@/lib/format"
 
 export const metadata = { title: "发起改版" }
@@ -78,8 +79,8 @@ export default async function ReviseQuestionPage({ params }) {
     return <AccessDenied title="题目尚未入库" description="该题还没有入库版本，请直接编辑草稿提交。" />
   }
 
-  const nodeRes = await subjectNodesQuery(supabase)
-  const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodeRes.data)
+  const nodes = await loadSubjectNodes()
+  const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
   const node = nodeMap.get(question.course_node_id)
   if (node?.is_frozen) {
     return <AccessDenied title="科目节点已冻结" description={`「${node.name}」节点已冻结，不能为该题发起新版本。`} />
@@ -104,7 +105,7 @@ export default async function ReviseQuestionPage({ params }) {
       <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         归属科目：{nodePath(question.course_node_id)} · 将创建为 v{cur.version_no + 1}
       </div>
-      <QuestionEditor nodes={nodeRes.data ?? []} initial={initial} reviseQuestionId={question.id} mode="new" />
+      <QuestionEditor nodes={nodes} initial={initial} reviseQuestionId={question.id} mode="new" />
     </div>
   )
 }

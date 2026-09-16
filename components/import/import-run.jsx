@@ -9,7 +9,7 @@
 //      已完成的页不会被重跑（认领条件排除了它们）。
 //   3. 页面素材只在需要时渲染：一页 6 张切片约 1.2MB，一次拿太多会把内存吃满。
 
-import * as React from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { PAGE_STATES, pageStateChip } from "@/lib/import-jobs"
@@ -69,20 +69,20 @@ function releaseRunLock(jobId) {
 }
 
 export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, onFinished, onRePick }) {
-  const [running, setRunning] = React.useState(false)
-  const [laneState, setLaneState] = React.useState({})
+  const [running, setRunning] = useState(false)
+  const [laneState, setLaneState] = useState({})
   // 最近一页的耗时拆解：素材（浏览器渲染+编码）与请求（上传+模型+落库）分开计时。
   // 没有这个就只能靠猜——而"慢"的成因完全可能是本地上行带宽而不是模型。
-  const [timing, setTiming] = React.useState(null)
-  const [error, setError] = React.useState(null)
-  const stopRef = React.useRef(false)
-  const startedRef = React.useRef(false)
+  const [timing, setTiming] = useState(null)
+  const [error, setError] = useState(null)
+  const stopRef = useRef(false)
+  const startedRef = useRef(false)
 
   // 密钥在 localStorage 里，SSR 读不到：用 hook 在挂载后读，避免 hydration 不一致
   const { hasKey, ready: keyReady, refresh: refreshKey } = useDeepSeekPrefs()
   // 解析节奏同样存在本机；默认稳妥，挂载后再读（避免 hydration 不一致）
-  const [pace, setPace] = React.useState("safe")
-  React.useEffect(() => {
+  const [pace, setPace] = useState("safe")
+  useEffect(() => {
     try {
       const v = localStorage.getItem(PACE_KEY)
       if (v && PACES[v]) setPace(v)
@@ -103,7 +103,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
     (p) => p.attempts < 3 && (p.status === "pending" || p.status === "running")
   ).length
 
-  React.useEffect(() => {
+  useEffect(() => {
     // 卸载时让循环退出。在途的那一批会自然跑完并落库——这比强行中断更好：
     // 中断会让已花的钱白费，而结果落库后页面上是"已完成"。
     const release = () => releaseRunLock(job.id)

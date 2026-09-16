@@ -1,7 +1,7 @@
 "use client"
 
 // 题库筛选条：改动即改写 URL 查询参数，由服务端题库页按新条件重新装配（无本地数据状态）。
-import * as React from "react"
+import { useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { QTYPES } from "@/lib/question-model"
 import { nodePathOf } from "@/lib/subject-nodes"
@@ -13,8 +13,8 @@ import { SearchIcon, XIcon } from "lucide-react"
 export function BankFilters({ nodes, tags, value }) {
   const router = useRouter()
   const pathname = usePathname() ?? "/bank"
-  const [kw, setKw] = React.useState(value.kw ?? "")
-  const [nodeOpen, setNodeOpen] = React.useState(false)
+  const [kw, setKw] = useState(value.kw ?? "")
+  const [nodeOpen, setNodeOpen] = useState(false)
   const selectedNode = value.node ? (nodes ?? []).find((n) => n.id === value.node) : null
 
   // 改动即改写 URL（不带 page：换筛选条件回到第一页）

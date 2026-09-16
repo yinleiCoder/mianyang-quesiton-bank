@@ -6,7 +6,8 @@ import { AccessDenied } from "@/components/access-denied"
 import { ReviewDetail } from "@/components/review/review-detail"
 import { KIND_LABELS, STAGE_LABELS } from "@/lib/review-workbench"
 import { qtypeLabel, difficultyLabel } from "@/lib/question-model"
-import { indexNodes, subjectNodesQuery } from "@/lib/subject-nodes"
+import { indexNodes } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { toISO } from "@/lib/format"
 
 export const metadata = { title: "审批详情" }
@@ -40,7 +41,7 @@ export default async function ReviewDetailPage({ params }) {
   const contentKind = approval.kind === "content"
   const showVersionId = contentKind ? approval.version_id : question.current_published_version_id
 
-  const [vRes, tlRes, nRes, sRes] = await Promise.all([
+  const [vRes, tlRes, nodes, sRes] = await Promise.all([
     showVersionId
       ? supabase
           .from("question_versions")
@@ -57,13 +58,13 @@ export default async function ReviewDetailPage({ params }) {
           .eq("question_id", question.id)
           .is("version_id", null)
     ).order("created_at", { ascending: true }),
-    subjectNodesQuery(supabase),
+    loadSubjectNodes(),
     supabase.from("schools").select("id, name"),
   ])
 
   const version = vRes.data
   const timeline = tlRes.data ?? []
-  const { byId: nodeMap, pathOf: nodePath } = indexNodes(nRes.data)
+  const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
   const schoolMap = new Map((sRes.data ?? []).map((s) => [s.id, s.name]))
 
   // 人名聚合：作者/处理人/决策人

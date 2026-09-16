@@ -1,7 +1,7 @@
 // 只读题目渲染（审批详情/题库预览共用）。showAnswer=false 时隐藏答案与解析（公众视角）；
 // 审核视角 showAnswer=true 需看到答案才能判断。媒体块按 object_key 拼 CNAME 公网域名真实渲染。
 import { blocksToText, qtypeLabel } from "@/lib/question-model"
-import { objectUrl } from "@/lib/oss-url"
+import { mediaUrl } from "@/lib/oss-url"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2Icon, FileIcon } from "lucide-react"
 
@@ -12,7 +12,7 @@ function BlockView({ block }) {
     return t ? <p className="whitespace-pre-wrap">{t}</p> : null
   }
   if (block.t === "media") {
-    const src = objectUrl(block.key ?? block.url)
+    const src = mediaUrl(block.key ?? block.url)
     if (!src) return null
     if (block.kind === "audio") return <audio controls src={src} className="h-9 w-full" />
     if (block.kind === "video") return <video controls src={src} className="max-h-80 rounded-md" />

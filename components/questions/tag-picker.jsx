@@ -2,7 +2,7 @@
 
 // 知识点标签选择器：搜索已有标签（同名不区分大小写）+ 回车新建（create_tag RPC）。
 // value: [{id,name}]（新标签即时回调）；标签随草稿保存，改名校验在提交时走 DB 快照。
-import * as React from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
@@ -10,12 +10,12 @@ import { Input } from "@/components/ui/input"
 import { Loader2Icon, PlusIcon, SearchIcon, XIcon } from "lucide-react"
 
 export function TagPicker({ value = [], onChange, allowCreate = true }) {
-  const [all, setAll] = React.useState(null) // null=加载中；全量标签列表（量级小）
-  const [q, setQ] = React.useState("")
-  const [creating, setCreating] = React.useState(false)
-  const [focused, setFocused] = React.useState(false)
+  const [all, setAll] = useState(null) // null=加载中；全量标签列表（量级小）
+  const [q, setQ] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [focused, setFocused] = useState(false)
 
-  React.useEffect(() => {
+  useEffect(() => {
     let alive = true
     ;(async () => {
       const supabase = createClient()

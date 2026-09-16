@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
@@ -162,7 +162,7 @@ function NodeRow({ entry, depth, onOpenDialog, onFreeze }) {
 // "Cannot read properties of null (reading 'node')"。挪进只在删除分支挂载的组件后，
 // 求值必然发生在 node 非空之后（同 confirm-dialog 顶部那条条件挂载约定）。
 function DeleteNodeDialog({ node, onClose, onDeleted }) {
-  const [busy, setBusy] = React.useState(false)
+  const [busy, setBusy] = useState(false)
 
   async function handleDelete() {
     setBusy(true)
@@ -245,14 +245,14 @@ function ScopePane({ scope, trees, onOpenDialog, onFreeze }) {
 export function TreeManager({ nodes }) {
   // 数据自管理：初始值由服务端传入（SSR 首屏），每次操作成功后用浏览器端
   // 客户端重查全量节点刷新本地状态——不依赖 router.refresh，保证立即显示。
-  const [list, setList] = React.useState(nodes)
-  const [busy, setBusy] = React.useState(false)
-  const trees = React.useMemo(() => buildTrees(list), [list])
+  const [list, setList] = useState(nodes)
+  const [busy, setBusy] = useState(false)
+  const trees = useMemo(() => buildTrees(list), [list])
   const hasAny = list.length > 0
 
   // 动作：{ type, node?, scope?, name?, value }
-  const [action, setAction] = React.useState(null)
-  const [name, setName] = React.useState("")
+  const [action, setAction] = useState(null)
+  const [name, setName] = useState("")
 
   async function refreshList() {
     const { data } = await subjectNodesQuery(createClient(), { sorted: true })

@@ -1,7 +1,7 @@
 "use client"
 
 // /admin/reviews 行列表：等待中的任务可直接转派/指派给任一用户（DB 校验管理员身份与约束）。
-import * as React from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -24,9 +24,9 @@ import {
 
 export function ReviewHistoryList({ rows, users }) {
   const router = useRouter()
-  const [target, setTarget] = React.useState(null) // { approvalId, assignedName }
-  const [toUser, setToUser] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const [target, setTarget] = useState(null) // { approvalId, assignedName }
+  const [toUser, setToUser] = useState("")
+  const [busy, setBusy] = useState(false)
 
   async function runTransfer() {
     if (!target || !toUser) return

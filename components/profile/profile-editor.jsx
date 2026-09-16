@@ -5,7 +5,7 @@
 //   · 姓名必填；学校仅可选启用中的学校；换校/解绑存在身份约束（组长任命、学校管理员），由 RPC 兜底报错；
 //   · 头像 avatarKey 存相对 key（avatars/…），展示用 avatarUrl() 拼 CNAME 域名；≤5MB 的 png/jpg/webp。
 //     更换/移除时旧对象由 /api/oss/delete 清理（先落库再删，失败只提示不回滚）。
-import * as React from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -47,21 +47,21 @@ const NONE_SCHOOL = "__none__"
 
 export function ProfileEditor({ userId, email, initial, schools }) {
   const router = useRouter()
-  const supabaseRef = React.useRef(null)
+  const supabaseRef = useRef(null)
   const getSb = () => (supabaseRef.current ??= createClient())
 
-  const [name, setName] = React.useState(initial.name)
-  const [school, setSchool] = React.useState(initial.schoolId ?? "")
-  const [avatarKey, setAvatarKey] = React.useState(initial.avatarKey)
-  const [saving, setSaving] = React.useState(false)
-  const [avatarBusy, setAvatarBusy] = React.useState(false)
-  const [avatarOpen, setAvatarOpen] = React.useState(false)
-  const [removeAsk, setRemoveAsk] = React.useState(false)
+  const [name, setName] = useState(initial.name)
+  const [school, setSchool] = useState(initial.schoolId ?? "")
+  const [avatarKey, setAvatarKey] = useState(initial.avatarKey)
+  const [saving, setSaving] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarOpen, setAvatarOpen] = useState(false)
+  const [removeAsk, setRemoveAsk] = useState(false)
 
   // 邮箱更换：输入框切换 + 提交（经 Auth API；确认流程下新邮箱待验证）
-  const [emailDraft, setEmailDraft] = React.useState("")
-  const [editingEmail, setEditingEmail] = React.useState(false)
-  const [emailBusy, setEmailBusy] = React.useState(false)
+  const [emailDraft, setEmailDraft] = useState("")
+  const [editingEmail, setEditingEmail] = useState(false)
+  const [emailBusy, setEmailBusy] = useState(false)
 
   const nameDirty = name.trim() !== initial.name
   const schoolDirty = (school || null) !== initial.schoolId

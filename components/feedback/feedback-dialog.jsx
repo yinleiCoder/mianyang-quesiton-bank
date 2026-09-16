@@ -4,7 +4,7 @@
 // 提交走 submit_feedback RPC（客户端无 DML，见 0033）；成功后只回一个短编号——
 // 本功能没有回复闭环，「已处理」状态提交人看不到，所以文案必须把预期说清楚。
 // 挂载方式遵循 ConfirmDialog 的条件挂载约定：父层写 {open && <FeedbackDialog … />}。
-import * as React from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -27,10 +27,10 @@ const MIN_LEN = 5
 
 export function FeedbackDialog({ onClose }) {
   const router = useRouter()
-  const [category, setCategory] = React.useState("bug")
-  const [content, setContent] = React.useState("")
-  const [contact, setContact] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const [category, setCategory] = useState("bug")
+  const [content, setContent] = useState("")
+  const [contact, setContact] = useState("")
+  const [busy, setBusy] = useState(false)
 
   const length = content.trim().length
   const tooShort = length < MIN_LEN

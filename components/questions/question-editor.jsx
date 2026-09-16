@@ -2,7 +2,7 @@
 
 // 题目编辑器：六种题型 + 复合题（材料+子题）。内部编辑态经 lib/question-model 序列化/校验后走 RPC 落库。
 // 草稿保存需内容结构完整（DB 校验收口）；提交额外要求标签与解析，校验错误逐条 toast。
-import * as React from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -319,10 +319,10 @@ export function QuestionEditor({
   reviseQuestionId = null, // 改版模式：已入库题 id；保存走 create_edit_draft（新版本草稿），节点沿用原题
 }) {
   const router = useRouter()
-  const [d, setD] = React.useState(() => initial ?? defaultDraft())
-  const [vid, setVid] = React.useState(versionId)
-  const [busy, setBusy] = React.useState("") // '' | 'save' | 'submit'
-  const [warn, setWarn] = React.useState([])
+  const [d, setD] = useState(() => initial ?? defaultDraft())
+  const [vid, setVid] = useState(versionId)
+  const [busy, setBusy] = useState("") // '' | 'save' | 'submit'
+  const [warn, setWarn] = useState([])
   const revising = Boolean(reviseQuestionId)
 
   const set = (patch) => setD((prev) => ({ ...prev, ...patch }))
@@ -333,7 +333,7 @@ export function QuestionEditor({
     }))
 
   // 改版模式：节点由原题锁定，仅展示科目路径
-  const lockedNodePath = React.useMemo(() => {
+  const lockedNodePath = useMemo(() => {
     if (!reviseQuestionId) return ""
     return indexNodes(nodes ?? []).pathOf(d.nodeId)
   }, [reviseQuestionId, nodes, d.nodeId])

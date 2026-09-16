@@ -2,7 +2,7 @@
 
 // 学校贡献图表（管理端）：每校 教师数 / 题目数 分组柱状图。
 // 数据由服务端 school_contribution_stats RPC 拉取后透传（纯 props，无客户端请求）。
-import * as React from "react"
+import { useMemo } from "react"
 import {
   Bar,
   BarChart,
@@ -18,7 +18,7 @@ import { cn } from "cn"
 const shortName = (n) => (n && n.length > 7 ? `${n.slice(0, 7)}…` : n ?? "")
 
 export function SchoolContributionChart({ data, className }) {
-  const rows = React.useMemo(
+  const rows = useMemo(
     () => (data ?? []).map((r) => ({ ...r, teacher_count: Number(r.teacher_count), question_count: Number(r.question_count) })),
     [data]
   )

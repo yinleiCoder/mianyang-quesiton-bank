@@ -8,7 +8,7 @@
 //
 // 解析执行（跑批）在 import-run.jsx；这里只准备任务参数。
 
-import * as React from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { SOURCE_KINDS, jobStateChip } from "@/lib/import-jobs"
@@ -51,22 +51,22 @@ function samplePages(from, to, max) {
 }
 
 export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
-  const [picked, setPicked] = React.useState(null) // { kind, name, pages, sizeMB, handle }
-  const [probed, setProbed] = React.useState(null) // { samples, total, textPages, scanPages }
-  const [from, setFrom] = React.useState(1)
-  const [to, setTo] = React.useState(1)
-  const [title, setTitle] = React.useState("")
-  const [nodeId, setNodeId] = React.useState("")
-  const [tags, setTags] = React.useState([]) // TagPicker 的值是 {id,name} 对象数组，入库前要 .map(t => t.id)
-  const [difficulty, setDifficulty] = React.useState(2)
-  const [genAnalysis, setGenAnalysis] = React.useState(true)
-  const [busy, setBusy] = React.useState("")
-  const [trial, setTrial] = React.useState(null)
+  const [picked, setPicked] = useState(null) // { kind, name, pages, sizeMB, handle }
+  const [probed, setProbed] = useState(null) // { samples, total, textPages, scanPages }
+  const [from, setFrom] = useState(1)
+  const [to, setTo] = useState(1)
+  const [title, setTitle] = useState("")
+  const [nodeId, setNodeId] = useState("")
+  const [tags, setTags] = useState([]) // TagPicker 的值是 {id,name} 对象数组，入库前要 .map(t => t.id)
+  const [difficulty, setDifficulty] = useState(2)
+  const [genAnalysis, setGenAnalysis] = useState(true)
+  const [busy, setBusy] = useState("")
+  const [trial, setTrial] = useState(null)
   // 没有密钥就整块禁用（本功能不提供公共密钥，见 DeepSeekSettingsPanel）。
   // 用 hook 而不是 useState 初始化：密钥在 localStorage 里，SSR 阶段读不到
   const { hasKey, ready: keyReady, refresh: refreshKey } = useDeepSeekPrefs()
 
-  const inputRef = React.useRef(null)
+  const inputRef = useRef(null)
 
   async function handleFiles(files) {
     const list = Array.from(files ?? [])

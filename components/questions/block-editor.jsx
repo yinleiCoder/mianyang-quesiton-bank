@@ -4,11 +4,11 @@
 // 双向契约：值即内容块数组 [{t:'text'|'media',...}]，直接落入 DB content（无中间格式，历史版本块永不改写）。
 // 媒体块只存相对 key（服务端生成，qbank/…），展示时拼 CNAME 公网域名（见 lib/oss-url）。
 // 类型策略：题干/材料/解析可插图、音视频与文件附件（mediaLabel）；选项等纯文字场景传 noMedia，不提供媒体入口。
-import * as React from "react"
+import { useState } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { MediaUploaderDialog } from "@/components/media-uploader"
-import { objectUrl } from "@/lib/oss-url"
+import { mediaUrl } from "@/lib/oss-url"
 import { FileIcon, ImagePlusIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 // 文件块展示名：优先存原始文件名（alt），兜底从 key 提炼扩展名
@@ -31,8 +31,8 @@ export function BlockEditor({
   className = "",
 }) {
   const list = blocks ?? []
-  const [autoFocusIdx, setAutoFocusIdx] = React.useState(null)
-  const [mediaOpen, setMediaOpen] = React.useState(false)
+  const [autoFocusIdx, setAutoFocusIdx] = useState(null)
+  const [mediaOpen, setMediaOpen] = useState(false)
 
   // 处理器直接用本次渲染的 list：onChange 后父层必然重渲染，闭包不会读到更旧的值。
   // （原先在渲染期写 ref 违反 Rules of React，会让 React Compiler 直接放弃优化整个编辑器。）
@@ -56,7 +56,7 @@ export function BlockEditor({
     <div className={`space-y-1.5 ${className}`}>
       {items.map((b, i) => {
         if (!b._ghost && b.t === "media") {
-          const src = objectUrl(b.key ?? b.url)
+          const src = mediaUrl(b.key ?? b.url)
           return (
             <div key={i} className="flex items-start gap-2 rounded-lg border bg-muted/40 p-2">
               <div className="min-w-0 flex-1">

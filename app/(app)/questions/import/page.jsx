@@ -2,7 +2,8 @@
 // 任务数据与页进度都在数据库里，刷新/关页面不丢；只有源文件留在浏览器内存。
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
-import { isAttachable, subjectNodesQuery } from "@/lib/subject-nodes"
+import { isAttachable } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { loadImportJob, loadImportJobs, loadJobItems, loadJobPages } from "@/lib/import-jobs"
 import { ImportPage } from "@/components/import/import-page"
 import { AccessDenied } from "@/components/access-denied"
@@ -24,8 +25,7 @@ export default async function ImportQuestionPage({ searchParams }) {
   }
 
   const supabase = await createClient()
-  const { data: nodes, error } = await subjectNodesQuery(supabase, { sorted: true })
-  if (error) throw error
+  const nodes = await loadSubjectNodes()
   // 只用来判断"有没有能挂题的节点"。
   // **传给选择器的必须是全量节点**：专业课程挂在「专业大类 → 专业」下面，
   // 只传课程的话它们在树里找不到父级、整枝消失（选择器自己会把不可挂题的节点标灰）。

@@ -1,7 +1,7 @@
 "use client"
 
 // 我的题目工作台：状态筛选、行内操作（编辑/提交/撤回/删除）。数据自管理：SSR seed + 操作后浏览器重查。
-import * as React from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -59,11 +59,11 @@ const CONFIRM_TEXT = {
 }
 
 export function MyQuestions({ initialRows, initialFilter = "all" }) {
-  const [rows, setRows] = React.useState(initialRows)
-  const [filter, setFilter] = React.useState(initialFilter)
-  const [pending, setPending] = React.useState(null) // {kind, row}
+  const [rows, setRows] = useState(initialRows)
+  const [filter, setFilter] = useState(initialFilter)
+  const [pending, setPending] = useState(null) // {kind, row}
   // 正在操作的行 id：单布尔会让整列表所有行一起转圈、一起禁用
-  const [busyId, setBusyId] = React.useState(null)
+  const [busyId, setBusyId] = useState(null)
 
   async function refresh() {
     const supabase = createClient()
@@ -113,13 +113,13 @@ export function MyQuestions({ initialRows, initialFilter = "all" }) {
     await refresh()
   }
 
-  const counts = React.useMemo(() => {
+  const counts = useMemo(() => {
     const c = { all: rows.length }
     for (const f of WORKBENCH_FILTERS) if (f.key !== "all") c[f.key] = rows.filter((r) => f.match(r.displayState)).length
     return c
   }, [rows])
 
-  const shown = React.useMemo(
+  const shown = useMemo(
     () => rows.filter((r) => (WORKBENCH_FILTERS.find((f) => f.key === filter) ?? WORKBENCH_FILTERS[0]).match(r.displayState)),
     [rows, filter]
   )

@@ -5,7 +5,7 @@ import { AccessDenied } from "@/components/access-denied"
 import { QuestionEditor } from "@/components/questions/question-editor"
 import { PageHeader } from "@/components/page-header"
 import { fromContent } from "@/lib/question-model"
-import { subjectNodesQuery } from "@/lib/subject-nodes"
+import { loadSubjectNodes } from "@/lib/reference-data"
 import { fmtDateTime24 } from "@/lib/format"
 
 export const metadata = { title: "修改题目" }
@@ -44,8 +44,8 @@ export default async function EditQuestionPage({ params }) {
     )
   }
 
-  const [nodesRes, tagsRes, notesRes] = await Promise.all([
-    subjectNodesQuery(supabase),
+  const [nodes, tagsRes, notesRes] = await Promise.all([
+    loadSubjectNodes(),
     supabase.from("version_tags").select("tag_id, tag_name").eq("version_id", working.id),
     supabase
       .from("approvals")
@@ -82,7 +82,7 @@ export default async function EditQuestionPage({ params }) {
         description="保存后修改立即生效于该版本；再次提交将从教研组长环节重新审核（全链重审）。"
       />
       <QuestionEditor
-        nodes={nodesRes.data ?? []}
+        nodes={nodes}
         initial={initial}
         versionId={working.id}
         returnedNote={

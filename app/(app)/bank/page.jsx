@@ -5,7 +5,8 @@ import Link from "next/link"
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { contentSummary, qtypeLabel, difficultyLabel } from "@/lib/question-model"
-import { subjectNodesQuery, indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
+import { indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
+import { loadSubjectNodes, loadTags } from "@/lib/reference-data"
 import { bankQueryString, hasBankFilters, parseBankFilters } from "@/lib/bank-query"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
@@ -29,13 +30,9 @@ export default async function BankPage({ searchParams }) {
   await requireUser()
   const supabase = await createClient()
 
-  // 筛选控件/节点路径所需的共享字典
-  const [nodesRes, tagsRes] = await Promise.all([
-    subjectNodesQuery(supabase, { sorted: true }),
-    supabase.from("tags").select("id, name").order("name"),
-  ])
-  const nodes = nodesRes.data ?? []
-  const tags = tagsRes.data ?? []
+  // 筛选控件/节点路径所需的共享字典。科目树与标签都是全市共享的公共词表，
+  // 走缓存的参考数据（lib/reference-data.js），不再每个请求各打一次往返。
+  const [nodes, tags] = await Promise.all([loadSubjectNodes(), loadTags()])
   const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
 
   // 科目筛选 = 所选节点及其全部后代（题库挂在学科/课程这类可挂节点上）
