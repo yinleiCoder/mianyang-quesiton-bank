@@ -147,7 +147,11 @@ export default async function ReviewDetailPage({ params }) {
           id: question.id,
           creatorId: question.creator_id,
           state: question.state,
-          nodePath,
+          // 必须是**调用结果**，不能把 pathOf 这个函数本身传下去：
+          // 客户端组件跨越 RSC 边界只收可序列化的值，传函数会让整个页面在 SSR 抛
+          // 「Functions cannot be passed directly to Client Components」——
+          // 而且是在所有查询都成功之后才炸，日志上看不出任何异常。
+          nodePath: nodePath(question.course_node_id),
           schoolName: schoolMap.get(question.school_id) ?? "",
           creatorName: userMap.get(question.creator_id) ?? "已注销",
           courseNodeName: nodeMap.get(question.course_node_id)?.name ?? "",
