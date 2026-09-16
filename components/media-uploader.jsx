@@ -1,8 +1,8 @@
 "use client"
 
 // 通用 OSS 直传对话框：react-dropzone 选文件 → 本地预览 → 服务端预签名 → 浏览器直传。
-// purpose 决定允许的类型/大小与服务端 key 前缀：
-//   · question_media：图片/音频/视频/文件附件 ≤50MB，成功后调 register_media 登记（随草稿保存挂版本引用）；
+// 允许的类型与大小上限的**真源在 lib/media-spec.js**（服务端预签名共用同一张表），本组件只做派生：
+//   · question_media：图片 ≤20MB、音频 ≤200MB、视频 ≤1GB、文档 ≤200MB，成功后调 register_media 登记；
 //   · avatar：图片 ≤5MB，不登记（头像只写 profiles.avatar_url，避免 GC 误删）。
 // 上传成功回调 onUploaded({ key, bucket, size, mime, kind, name })，由调用方决定写入位置。
 import * as React from "react"
@@ -11,6 +11,7 @@ import { toast } from "sonner"
 import { cn } from "cn"
 import { createClient } from "@/lib/supabase/client"
 import { uploadToOSS } from "@/lib/upload"
+import { acceptMap, limitsHint, tierFor, tooLargeMessage } from "@/lib/media-spec"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -22,42 +23,14 @@ import {
 } from "@/components/ui/dialog"
 import { FileIcon, Loader2Icon, RefreshCwIcon, UploadCloudIcon } from "lucide-react"
 
-const PURPOSE_CFG = {
-  question_media: {
-    accept: {
-      "image/png": [".png"],
-      "image/jpeg": [".jpg", ".jpeg"],
-      "image/webp": [".webp"],
-      "image/gif": [".gif"],
-      "audio/mpeg": [".mp3"],
-      "audio/wav": [".wav"],
-      "audio/ogg": [".ogg"],
-      "video/mp4": [".mp4"],
-      "video/webm": [".webm"],
-      "application/pdf": [".pdf"],
-      "application/msword": [".doc"],
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-      "application/vnd.ms-excel": [".xls"],
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-      "application/vnd.ms-powerpoint": [".ppt"],
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
-      "text/plain": [".txt"],
-      "text/markdown": [".md"],
-      "text/csv": [".csv"],
-    },
-    maxMB: 50,
-    hint: "图片、音视频或文档附件（≤50MB）；图片 png/jpg/webp/gif，音视频 mp3/wav/ogg/mp4/webm，附件 pdf/word/excel/ppt/txt/md/csv",
-  },
-  avatar: {
-    accept: {
-      "image/png": [".png"],
-      "image/jpeg": [".jpg", ".jpeg"],
-      "image/webp": [".webp"],
-    },
-    maxMB: 5,
-    hint: "头像图片（≤5MB，png/jpg/webp），建议正方形",
-  },
+// 说明文字分两半：尺寸那半句由 limitsHint() 从真源生成，扩展名那半句手写——
+// 自动生成会把 word 摊成 doc/docx，可读性反而更差。**新增类型时记得同步手写的那半句。**
+const HINT_TAIL = {
+  question_media: "；图片 png/jpg/webp/gif，音视频 mp3/wav/ogg/mp4/webm，附件 pdf/word/excel/ppt/txt/md/csv",
+  avatar: "（png/jpg/webp），建议正方形",
 }
+
+const hintFor = (purpose) => `${limitsHint(purpose)}${HINT_TAIL[purpose] ?? ""}`
 
 function KindLabel({ meta }) {
   return (
@@ -78,7 +51,6 @@ export function MediaUploaderDialog({
   title = purpose === "avatar" ? "更换头像" : "插入图片 / 音视频 / 文件",
   description,
 }) {
-  const cfg = PURPOSE_CFG[purpose]
   const [file, setFile] = React.useState(null)
   const [previewUrl, setPreviewUrl] = React.useState(null) // 本地预览（文件可能尚未上传）
   const [busy, setBusy] = React.useState(false)
@@ -103,16 +75,37 @@ export function MediaUploaderDialog({
     setDone(false)
   }, [])
 
+  const accept = React.useMemo(() => acceptMap(purpose), [purpose])
+
+  // 分档校验只能走 validator：react-dropzone 的 maxSize 是单一数值，表达不了「图片 20MB / 视频 1GB」。
+  // 返回的 message 与服务端 400 的文案同源（tooLargeMessage），两边不会各说各话。
+  const validate = React.useCallback(
+    (f) => {
+      const tier = tierFor(purpose, f.type)
+      if (!tier) return { code: "file-invalid-type", message: "不支持的文件类型" }
+      if (f.size > tier.maxBytes) {
+        return { code: "file-too-large", message: tooLargeMessage(purpose, f.type) }
+      }
+      return null
+    },
+    [purpose]
+  )
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: cfg.accept,
+    accept,
+    validator: validate,
     disabled: busy,
     multiple: false,
+    // 内置报错是英文（File is larger than… / File type must be…），不接管会直接漏给用户
+    getErrorMessage: (error, f) => {
+      if (error.code === "file-invalid-type") return "不支持的文件类型"
+      if (error.code === "file-too-large") return tooLargeMessage(purpose, f.type)
+      if (error.code === "too-many-files") return "一次只能上传一个文件"
+      return "无法读取该文件，请重试"
+    },
     onDropRejected: (rejects) => {
-      const code = rejects[0]?.errors?.[0]?.code
-      if (code === "file-invalid-type") toast.error("不支持的文件类型")
-      else if (code === "file-too-large") toast.error(`文件超过 ${cfg.maxMB}MB 上限`)
-      else if (code === "too-many-files") toast.error("一次只能上传一个文件")
-      else toast.error("无法读取该文件，请重试")
+      // message 已由 getErrorMessage 本地化（含 validator 自己返回的那条）
+      toast.error(rejects[0]?.errors?.[0]?.message ?? "无法读取该文件，请重试")
     },
     onDropAccepted: ([f]) => {
       setFile(f)
@@ -156,7 +149,7 @@ export function MediaUploaderDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description ?? cfg.hint}</DialogDescription>
+          <DialogDescription>{description ?? hintFor(purpose)}</DialogDescription>
         </DialogHeader>
 
         {done && file ? (

@@ -1,0 +1,32 @@
+# CLI 部署（vercel --prod）上传的是工作目录，不像 Git 部署那样自动遵循 .gitignore。
+# 不做限制会把 Flutter 客户端、本地构建产物、编辑器配置一起传上去——既慢又可能泄露本地密钥。
+# 这里只保留 Next.js 站点真正需要的东西。
+
+# Flutter 客户端（本仓库同级，与 Next 站点无关）
+mianyang_quiz/
+
+# 本地构建产物与依赖（Vercel 会重新安装和构建）
+.next/
+node_modules/
+out/
+build/
+
+# 本地环境变量（内含 OSS 密钥与 VERCEL_OIDC_TOKEN，绝不能上传）
+.env
+.env.*
+!.env.example
+
+# 编辑器 / 工具配置
+.vscode/
+.agents/
+.claude/
+.vercel/
+
+# 仓库元信息与文档
+.git/
+.gitignore
+LICENSE
+README.md
+AGENTS.md
+CLAUDE.md
+skills-lock.json

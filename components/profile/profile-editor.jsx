@@ -4,11 +4,14 @@
 // 约束与提示：
 //   · 姓名必填；学校仅可选启用中的学校；换校/解绑存在身份约束（组长任命、学校管理员），由 RPC 兜底报错；
 //   · 头像 avatarKey 存相对 key（avatars/…），展示用 avatarUrl() 拼 CNAME 域名；≤5MB 的 png/jpg/webp。
+//     更换/移除时旧对象由 /api/oss/delete 清理（先落库再删，失败只提示不回滚）。
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { avatarUrl } from "@/lib/oss-url"
+import { deleteOssObject } from "@/lib/upload"
+import { TIERS, formatLimit } from "@/lib/media-spec"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -66,12 +69,14 @@ export function ProfileEditor({ userId, email, initial, schools }) {
 
   // 换校/解绑需带当前头像 key 一并保存；约束冲突（组长任命等）由 RPC 明确报错
   async function saveProfile(patch = {}) {
+    const prevKey = avatarKey // 保存前的旧头像 key，保存成功后用它清理 OSS 上的文件
+    const nextKey = patch.avatarKey !== undefined ? patch.avatarKey : avatarKey
     setSaving(true)
     const supabase = getSb()
     const { error } = await supabase.rpc("update_own_profile", {
       p_name: patch.name !== undefined ? patch.name : name,
       p_school_id: patch.school !== undefined ? patch.school : school || null,
-      p_avatar_url: patch.avatarKey !== undefined ? patch.avatarKey : avatarKey,
+      p_avatar_url: nextKey,
     })
     setSaving(false)
     if (error) {
@@ -83,6 +88,19 @@ export function ProfileEditor({ userId, email, initial, schools }) {
     if (patch.avatarKey !== undefined) setAvatarKey(patch.avatarKey)
     toast.success("已保存")
     router.refresh()
+    // 先落库、再删对象，顺序不能反——服务端会校验「仍被引用则拒删」。
+    // 只传相对 key：历史行里可能存的是完整 URL，那种形态没有对应的对象可删。
+    // 不 await：删除是收尾动作，不该拖慢交互；失败也只提示，不影响已经成功的保存。
+    if (
+      patch.avatarKey !== undefined &&
+      prevKey &&
+      prevKey !== nextKey &&
+      prevKey.startsWith("avatars/")
+    ) {
+      deleteOssObject(prevKey).then(({ ok, error: e }) => {
+        if (!ok) toast.warning(`头像已更新，但旧文件未能删除：${e}`)
+      })
+    }
     return true
   }
 
@@ -127,7 +145,9 @@ export function ProfileEditor({ userId, email, initial, schools }) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">头像</CardTitle>
-          <CardDescription>png / jpg / webp，≤5MB，建议正方形</CardDescription>
+          <CardDescription>
+            png / jpg / webp，≤{formatLimit(TIERS.avatar.maxBytes)}，建议正方形
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-3">
           <Avatar className="size-24 rounded-full">
@@ -276,7 +296,9 @@ export function ProfileEditor({ userId, email, initial, schools }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>移除当前头像？</AlertDialogTitle>
-            <AlertDialogDescription>移除后将以姓名首字占位显示，不会删除 OSS 上已上传文件。</AlertDialogDescription>
+            <AlertDialogDescription>
+              移除后将以姓名首字占位显示，并删除 OSS 上已上传的头像文件（不可恢复）。
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

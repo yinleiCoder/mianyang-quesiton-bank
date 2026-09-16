@@ -10,6 +10,10 @@
         "shadcn@latest",
         "mcp"
       ]
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com"
     }
   }
 }
