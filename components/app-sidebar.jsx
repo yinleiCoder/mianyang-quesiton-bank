@@ -46,6 +46,7 @@ import {
   ScrollTextIcon,
   TagsIcon,
   CircleUserRoundIcon,
+  DownloadIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -284,6 +285,11 @@ export function AppSidebar({
                 <DropdownMenuItem render={<Link href="/profile" />}>
                   <CircleUserRoundIcon />
                   个人资料
+                </DropdownMenuItem>
+                {/* 客户端下载页是公开页：学生没账号也能拿到安装包，老师在这里顺手转发 */}
+                <DropdownMenuItem render={<Link href="/download" />}>
+                  <DownloadIcon />
+                 下载客户端
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setFeedbackOpen(true)}>
                   <MessageSquareIcon />
