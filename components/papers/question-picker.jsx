@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useDraggable } from "@dnd-kit/core"
 import { createClient } from "@/lib/supabase/client"
 import { contentSummary, qtypeLabel, qtypeShortLabel, difficultyLabel, QTYPES, DIFFICULTIES } from "@/lib/question-model"
-import { indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
+import { indexNodes, isPaperNode, subtreeIdsOf } from "@/lib/subject-nodes"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -63,12 +63,21 @@ function DraggableRow({ row, onAdd }) {
   )
 }
 
-export function QuestionPicker({ nodes, targetSections, targetSectionKey, onTargetSectionChange, onAdd, existingIds }) {
+export function QuestionPicker({
+  nodes,
+  // 卷子挂哪个科目就默认筛哪个（专业大类/专业卷 → 其下全部课程的题），教师仍可切回"全部科目"
+  defaultNodeId = "",
+  targetSections,
+  targetSectionKey,
+  onTargetSectionChange,
+  onAdd,
+  existingIds,
+}) {
   const supabase = createClient()
   const [kw, setKw] = useState("")
   const [qtype, setQtype] = useState("")
   const [diff, setDiff] = useState("")
-  const [node, setNode] = useState("")
+  const [node, setNode] = useState(defaultNodeId)
   const [rows, setRows] = useState([])
   const [count, setCount] = useState(0)
   const [page, setPage] = useState(1)
@@ -77,7 +86,8 @@ export function QuestionPicker({ nodes, targetSections, targetSectionKey, onTarg
   const timer = useRef(null)
 
   const { byId: nodeMap } = indexNodes(nodes)
-  const attachable = nodes.filter((n) => n.kind === "discipline" || n.kind === "course")
+  // 筛选候选含专业大类/专业：选中即含其下所有课程的题（subtreeIdsOf 是子树口径）
+  const nodeOptions = nodes.filter((n) => isPaperNode(n.kind))
 
   const load = useCallback(
     async (pageNo) => {
@@ -170,7 +180,7 @@ export function QuestionPicker({ nodes, targetSections, targetSectionKey, onTarg
           className="h-8 w-full rounded-md border bg-transparent px-2 text-sm"
         >
           <option value="">全部科目</option>
-          {attachable.map((n) => (
+          {nodeOptions.map((n) => (
             <option key={n.id} value={n.id}>
               {nodeMap.get(n.id)?.path ?? n.name}
             </option>

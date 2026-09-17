@@ -55,9 +55,11 @@ import { TreePicker } from "@/components/admin/tree-picker"
 import { indexNodes } from "@/lib/subject-nodes"
 import { loadAdminUserDirectory } from "@/lib/admin-users"
 import { avatarUrl } from "@/lib/oss-url"
+import { fmtDateTime24 } from "@/lib/format"
 import {
   Building2Icon,
   CrownIcon,
+  IdCardIcon,
   Loader2Icon,
   MoreHorizontalIcon,
   SearchIcon,
@@ -71,6 +73,16 @@ import {
 
 const SCHOOL_ADMIN_ROLE = "school_admin"
 const schoolOf = (map, id) => (id ? (map.get(id)?.name ?? null) : null)
+// 学生只能"查看资料"：审核岗位与学校管理员都面向教师（服务端 0059 同样拦截）
+const isStudentUser = (u) => u.identity === "student"
+const identityLabel = (u) =>
+  u.identity === "student" ? "学生" : u.identity === "teacher_pending" ? "教师（待审核）" : "教师"
+// 资料弹窗里的一句话说明：三态身份的差别就在"能不能出题/被任命"
+const PROFILE_HINTS = {
+  student: "学生账号：只参与练习与考试，不参与出题、审核与任命。",
+  teacher_pending: "教师账号（待审核）：通过教师身份审核后才能出题。",
+  teacher: "教师账号：可出题、组卷，并可被任命为教研组长 / 市级专家。",
+}
 
 export function UsersManager({
   users: initialUsers,
@@ -174,14 +186,16 @@ export function UsersManager({
                 caller={caller}
                 onRpc={runRpc}
                 canBindSchool={caller.isAdmin}
-                canToggleSA={caller.isAdmin && !u.is_admin}
+                // 学生不参与审核与管理：三项任命一律不显示（他只会看到「查看资料」）
+                canToggleSA={caller.isAdmin && !u.is_admin && !isStudentUser(u)}
                 canAssignLeader={
                   !u.is_admin &&
+                  !isStudentUser(u) &&
                   Boolean(u.school_id) &&
                   caller.isSchoolAdmin &&
                   u.school_id === caller.schoolId
                 }
-                canAssignExpert={caller.isAdmin && !u.is_admin}
+                canAssignExpert={caller.isAdmin && !u.is_admin && !isStudentUser(u)}
               />
             ))}
           </TableBody>
@@ -210,12 +224,14 @@ function UserRow({
   const [saConfirm, setSaConfirm] = useState(false)
   const [saBusy, setSaBusy] = useState(false)
   const [picker, setPicker] = useState(null) // { role: 'group_leader' | 'city_expert' } 或 null
+  const [profileOpen, setProfileOpen] = useState(false)
   const [revokeId, setRevokeId] = useState(null)
   const [revokeBusy, setRevokeBusy] = useState(false)
   const [delOpen, setDelOpen] = useState(false)
   const [delBusy, setDelBusy] = useState(false)
   const [busyAction, setBusyAction] = useState("")
 
+  const isStudent = isStudentUser(u)
   const isSchoolAdminNow = schoolAdmins.has(u.user_id)
   const activeSchools = [...schoolMap.values()].filter((s) => s.is_active)
   const initial = (u.name || "?").slice(0, 1)
@@ -346,79 +362,129 @@ function UserRow({
           </div>
         </TableCell>
         <TableCell className="text-right">
-          {!menuBlocked && canAny && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon" className="size-8">
-                    <MoreHorizontalIcon className="size-4" />
-                    <span className="sr-only">操作</span>
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="min-w-52">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{u.name} · 操作</DropdownMenuLabel>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                {canBindSchool && (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      // 预填当前学校：否则 Select 显示的是用户现校、state 却是空串，
-                      // 直接点「保存」会被 doBind 的空值判断静默吞掉（什么都不发生）
-                      setBindSchool(u.school_id ?? "")
-                      setBindOpen(true)
-                    }}
-                  >
-                    <Building2Icon /> {u.school_id ? "更换绑定学校" : "绑定学校"}
-                  </DropdownMenuItem>
-                )}
-                {canToggleSA && (
-                  <DropdownMenuItem onClick={() => setSaConfirm(true)}>
-                    {isSchoolAdminNow ? <UserRoundXIcon /> : <UserRoundCheckIcon />}
-                    {isSchoolAdminNow ? "撤销学校管理员" : "任命学校管理员"}
-                  </DropdownMenuItem>
-                )}
-                {canAssignLeader && (
-                  <DropdownMenuItem onClick={() => setPicker({ role: "group_leader" })}>
-                    <UserCogIcon />
-                    任命教研组长…
-                  </DropdownMenuItem>
-                )}
-                {canAssignExpert && (
-                  <DropdownMenuItem onClick={() => setPicker({ role: "city_expert" })}>
-                    <UserPlusIcon />
-                    任命市级专家…
-                  </DropdownMenuItem>
-                )}
-                {revocable.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    {revocable.map((a) => {
-                      const path = pathOf(a.node_id) || "?"
-                      return (
-                        <DropdownMenuItem key={a.id} onClick={() => setRevokeId(a.id)}>
-                          <UserRoundXIcon />
-                          停用{a.role === "group_leader" ? "组长" : "专家"}任命：{path}
-                        </DropdownMenuItem>
-                      )
-                    })}
-                  </>
-                )}
-                {canDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-rose-600 data-open:text-rose-700" onClick={() => setDelOpen(true)}>
-                      <Trash2Icon />
-                      删除该用户
+          <div className="flex items-center justify-end gap-1">
+            {/* 学生的主操作就是看资料：任命类入口对他没有意义（服务端 0059 也拦） */}
+            {isStudent && (
+              <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>
+                <IdCardIcon className="size-3.5" /> 查看资料
+              </Button>
+            )}
+            {!menuBlocked && canAny && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" size="icon" className="size-8">
+                      <MoreHorizontalIcon className="size-4" />
+                      <span className="sr-only">操作</span>
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="min-w-52">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{u.name} · 操作</DropdownMenuLabel>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  {!isStudent && (
+                    <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                      <IdCardIcon /> 查看资料
                     </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  )}
+                  {canBindSchool && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        // 预填当前学校：否则 Select 显示的是用户现校、state 却是空串，
+                        // 直接点「保存」会被 doBind 的空值判断静默吞掉（什么都不发生）
+                        setBindSchool(u.school_id ?? "")
+                        setBindOpen(true)
+                      }}
+                    >
+                      <Building2Icon /> {u.school_id ? "更换绑定学校" : "绑定学校"}
+                    </DropdownMenuItem>
+                  )}
+                  {canToggleSA && (
+                    <DropdownMenuItem onClick={() => setSaConfirm(true)}>
+                      {isSchoolAdminNow ? <UserRoundXIcon /> : <UserRoundCheckIcon />}
+                      {isSchoolAdminNow ? "撤销学校管理员" : "任命学校管理员"}
+                    </DropdownMenuItem>
+                  )}
+                  {canAssignLeader && (
+                    <DropdownMenuItem onClick={() => setPicker({ role: "group_leader" })}>
+                      <UserCogIcon />
+                      任命教研组长…
+                    </DropdownMenuItem>
+                  )}
+                  {canAssignExpert && (
+                    <DropdownMenuItem onClick={() => setPicker({ role: "city_expert" })}>
+                      <UserPlusIcon />
+                      任命市级专家…
+                    </DropdownMenuItem>
+                  )}
+                  {revocable.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {revocable.map((a) => {
+                        const path = pathOf(a.node_id) || "?"
+                        return (
+                          <DropdownMenuItem key={a.id} onClick={() => setRevokeId(a.id)}>
+                            <UserRoundXIcon />
+                            停用{a.role === "group_leader" ? "组长" : "专家"}任命：{path}
+                          </DropdownMenuItem>
+                        )
+                      })}
+                    </>
+                  )}
+                  {canDelete && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-rose-600 data-open:text-rose-700" onClick={() => setDelOpen(true)}>
+                        <Trash2Icon />
+                        删除该用户
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </TableCell>
       </TableRow>
+
+      {/* 查看资料：学生账号唯一能做的事（他们不参与审核，可用的操作只剩绑定学校/删除） */}
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>用户资料</DialogTitle>
+            <DialogDescription>{PROFILE_HINTS[u.identity] ?? PROFILE_HINTS.teacher}</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-3">
+            <Avatar className="size-12 shrink-0">
+              {u.avatar_url && <AvatarImage src={avatarUrl(u.avatar_url)} alt={u.name || ""} />}
+              <AvatarFallback className="font-semibold">{initial}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="truncate font-medium">{u.name}</p>
+              <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+            </div>
+          </div>
+          <dl className="grid gap-2 text-sm">
+            {[
+              ["学校", schoolOf(schoolMap, u.school_id) ?? "未绑定"],
+              ["身份", identityLabel(u)],
+              ["注册时间", u.created_at ? fmtDateTime24(u.created_at) : "—"],
+            ].map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="truncate text-right">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 绑定学校对话框 */}
       <Dialog open={bindOpen} onOpenChange={setBindOpen}>

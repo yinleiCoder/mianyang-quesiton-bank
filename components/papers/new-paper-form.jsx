@@ -74,7 +74,8 @@ export function NewPaperForm({ nodes }) {
           ))}
         </select>
         <p className="mt-1 text-xs text-muted-foreground">
-          只能挂在公共学科或专业课程层；审核人按这个节点自动指派。
+          可挂公共学科、专业大类、专业或课程；挂专业大类/专业时，卷子收纳其下各课程的题。
+          审核人（教研组长 / 市级专家）按这个节点自动指派。
         </p>
       </div>
 

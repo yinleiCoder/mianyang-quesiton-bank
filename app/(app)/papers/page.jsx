@@ -5,7 +5,7 @@ import { requireUser, getAuthContext } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadPaperLibrary, loadMyPapers } from "@/lib/paper-workbench"
 import { loadSubjectNodes } from "@/lib/reference-data"
-import { indexNodes } from "@/lib/subject-nodes"
+import { indexNodes, isPaperNode } from "@/lib/subject-nodes"
 import { PaperCard } from "@/components/papers/paper-card"
 import { PageHeader } from "@/components/page-header"
 import { EmptyState } from "@/components/empty-state"
@@ -39,7 +39,8 @@ export default async function PapersPage({ searchParams }) {
   const total = result.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  const attachable = nodes.filter((n) => n.kind === "discipline" || n.kind === "course")
+  // 筛选口径与可建卷节点一致（含专业大类/专业——卷子可以挂在这些层，筛选按子树命中后端）
+  const pickable = nodes.filter((n) => isPaperNode(n.kind))
   const qs = (patch) => {
     const p = new URLSearchParams({ tab, ...(kw ? { kw } : {}), ...(node ? { node } : {}), ...(page > 1 ? { page: String(page) } : {}), ...patch })
     for (const [k, v] of [...p.entries()]) if (!v) p.delete(k)
@@ -97,7 +98,7 @@ export default async function PapersPage({ searchParams }) {
             className="h-9 rounded-md border bg-transparent px-3 text-sm"
           >
             <option value="">全部科目</option>
-            {attachable.map((n) => (
+            {pickable.map((n) => (
               <option key={n.id} value={n.id}>
                 {nodeMap.get(n.id)?.path ?? n.name}
               </option>

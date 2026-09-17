@@ -276,6 +276,7 @@ export function PaperEditor({ initialSnapshot, nodes }) {
             <h2 className="mb-2 text-sm font-medium">题库选题</h2>
             <QuestionPicker
               nodes={nodes}
+              defaultNodeId={initialSnapshot?.course_node_id ?? ""}
               targetSections={state.sections}
               targetSectionKey={effectiveTargetKey}
               onTargetSectionChange={setTargetSectionKey}
