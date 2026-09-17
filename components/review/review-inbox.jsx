@@ -1,7 +1,8 @@
 "use client"
 
 // 审批收件箱：我的待办（组长/专家环节统一）→ 处理入口到详情页；管理员多一个"管理"页签（可看全任务/待指派）。
-// 市级专家另有「一键入库」：把待办里的 city 环节内容任务一次性通过（详见 lib/bulk-rpc.js 的逐条策略）。
+// 待办上另有两种批量通过（详见 lib/bulk-rpc.js 的逐条策略）：
+//   市级专家「一键入库」（city 环节，通过即入库）与教研组长「一键流转」（group 环节，通过仅转给专家）。
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -16,19 +17,54 @@ import { EmptyState } from "@/components/empty-state"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ArrowRightIcon, CheckCircle2Icon, CircleSlash2Icon, InboxIcon, RotateCcwIcon } from "lucide-react"
 
-export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage, publishableIds = [] }) {
+// 批量通过的两个口径。语义不同（入库 vs 只是流转），所以是两个按钮、两次确认，绝不合并：
+// 组长环节按错一下就把全市可见的内容发出去了，这个误操作代价必须由确认文案挡住。
+const BULK_KINDS = {
+  publish: {
+    label: "一键入库",
+    verb: "入库",
+    hint: "把待办里市级专家环节的题目一次性通过：通过即入库、全市可见（等同逐题点「通过」）",
+    title: "一键入库？",
+    description: (n) =>
+      `将把分配给您的 ${n} 道待办一次性通过，通过后题目立即入库、全市教师可见。\n` +
+      `批量通过不附审批意见；需要写明意见的题目请逐题打开处理。`,
+    confirmText: "确认入库",
+  },
+  flow: {
+    label: "一键流转",
+    verb: "流转",
+    hint: "把待办里教研组长环节的题目一次性通过：通过后流转至市级专家，此时尚未入库、全市不可见",
+    title: "一键流转至市级专家？",
+    description: (n) =>
+      `将把分配给您的 ${n} 道待办一次性通过，通过后题目流转到市级专家环节等待入库，此时尚未对全市可见。\n` +
+      `批量通过不附审批意见；需要写明意见的题目请逐题打开处理。`,
+    confirmText: "确认流转",
+  },
+}
+
+export function ReviewInbox({
+  mineRows,
+  decidedRows,
+  manageRows,
+  canManage,
+  publishableIds = [],
+  flowableIds = [],
+}) {
   const router = useRouter()
   const [tab, setTab] = useState("mine")
-  // 待入库的任务 id：以服务端为准（router.refresh() 后 prop 会换新），本页批量通过的
-  // 记进 processed 摘掉——这样「别处已处理」的失败项也不会在按钮计数里阴魂不散
+  // 已批量处理掉的任务 id：以服务端为准（router.refresh() 后 prop 会换新），本页批量通过的
+  // 记进 processed 摘掉——这样「别处已处理」的失败项也不会在按钮计数里阴魂不散。
+  // 两种批量共用一个数组：一道题同时只处在一个环节，两边不会有交集
   const [processed, setProcessed] = useState([])
-  const publishIds = publishableIds.filter((id) => !processed.includes(id))
-  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulk, setBulk] = useState(null) // 待确认的批量动作 {kind, ids}；ids 在点开确认框时定格
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(null) // {done, total}
 
-  async function publishAll() {
-    const ids = publishIds
+  const pendingOf = (kind) =>
+    (kind === "publish" ? publishableIds : flowableIds).filter((id) => !processed.includes(id))
+
+  async function runBulk() {
+    const { kind, ids } = bulk
     if (ids.length === 0) return
     const supabase = createClient()
     setBusy(true)
@@ -47,16 +83,16 @@ export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage, publ
       const failedIds = new Set(failed.map((f) => f.id))
       // 只有通过的才摘掉：失败的留在待办里，点开还能看到原因（多半是被别处处理过）
       setProcessed((prev) => [...prev, ...ids.filter((id) => !failedIds.has(id))])
-      const text = bulkResultMessage("入库", ok, failed)
+      const text = bulkResultMessage(BULK_KINDS[kind].verb, ok, failed)
       if (failed.length > 0) toast.warning(text)
       else toast.success(text)
       router.refresh() // 待办/已处理两个页签的数据都来自服务端
     } catch (err) {
-      toast.error(err?.message ?? "批量入库失败")
+      toast.error(err?.message ?? "批量处理失败")
     } finally {
       setBusy(false)
       setProgress(null)
-      setBulkOpen(false)
+      setBulk(null)
     }
   }
   // 页签 = 数据源 + 行态 + 空态文案；「管理」仅管理员可见
@@ -106,18 +142,28 @@ export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage, publ
             </button>
           ))}
         </div>
-        {/* 一键入库：只在「我的待办」页签、且确有可入库任务时出现。
-            可入库 = 市级专家环节的内容任务（见 lib/review-workbench.js），组长/教师恒为 0 */}
-        {tab === "mine" && publishIds.length > 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            title="把待办里市级专家环节的题目一次性通过：通过即入库、全市可见（等同逐题点「通过」）"
-            onClick={() => setBulkOpen(true)}
-            disabled={busy}
-          >
-            <CheckCircle2Icon className="size-3.5" /> 一键入库（{publishIds.length}）
-          </Button>
+        {/* 批量通过：只在「我的待办」页签、且确有对应任务时出现（见 lib/review-workbench.js）。
+            教研组长看得到「一键流转」，市级专家看得到「一键入库」，两者都有则两个按钮并排 */}
+        {tab === "mine" && (
+          <div className="flex flex-wrap gap-1.5">
+            {["flow", "publish"].map((kind) => {
+              const ids = pendingOf(kind)
+              if (ids.length === 0) return null
+              const cfg = BULK_KINDS[kind]
+              return (
+                <Button
+                  key={kind}
+                  size="sm"
+                  variant="outline"
+                  title={cfg.hint}
+                  onClick={() => setBulk({ kind, ids })}
+                  disabled={busy}
+                >
+                  <CheckCircle2Icon className="size-3.5" /> {cfg.label}（{ids.length}）
+                </Button>
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -132,19 +178,18 @@ export function ReviewInbox({ mineRows, decidedRows, manageRows, canManage, publ
       )}
 
       {/* 批量确认（条件挂载）：进度写进确认按钮——几百条要跑一会儿 */}
-      {bulkOpen && (
+      {bulk && (
         <ConfirmDialog
-          title="一键入库？"
-          description={
-            `将把分配给您的 ${publishIds.length} 道待办一次性通过，通过后题目立即入库、全市教师可见。\n` +
-            `批量通过不附审批意见；需要写明意见的题目请逐题打开处理。`
-          }
+          title={BULK_KINDS[bulk.kind].title}
+          description={BULK_KINDS[bulk.kind].description(bulk.ids.length)}
           confirmText={
-            busy ? `处理中… ${progress?.done ?? 0}/${progress?.total ?? 0}` : "确认入库"
+            busy
+              ? `处理中… ${progress?.done ?? 0}/${progress?.total ?? 0}`
+              : BULK_KINDS[bulk.kind].confirmText
           }
           busy={busy}
-          onConfirm={publishAll}
-          onClose={() => setBulkOpen(false)}
+          onConfirm={runBulk}
+          onClose={() => setBulk(null)}
         />
       )}
     </div>
@@ -176,7 +221,12 @@ function Row({ r, decided = false, manage = false }) {
               {stateChip.text}
             </span>
           )}
-          {manage && (a.assigned_user_id ? <span>处理人：{r.assignedName}</span> : <span className="text-amber-600">待指派</span>)}
+          {manage &&
+            (r.assignedNames.length > 0 ? (
+              <span>处理人：{r.assignedNames.join("、")}</span>
+            ) : (
+              <span className="text-amber-600">待指派</span>
+            ))}
           <span className="text-muted-foreground/70">{fmtDateTime24(a.created_at ?? a.decided_at)}</span>
         </div>
         <p className="line-clamp-2 text-sm text-foreground/90">

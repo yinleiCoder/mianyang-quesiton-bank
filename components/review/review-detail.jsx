@@ -150,11 +150,13 @@ export function ReviewDetail({ data }) {
 
   const chain = a.kind === "content" ? deriveChain(v, data.timeline) : null
   const versionChip = v ? statusChip(v.status) : null
-  const noAssignee = a.state === "waiting" && !a.assignedUserId
+  // 处理人是一组人（岗位池）：空池 = 待指派
+  const noAssignee = a.state === "waiting" && a.assignedUserIds.length === 0
+  const assignedLabel = a.assignedNames.join("、")
 
-  // 转派目标不可为作者本人或当前处理人
+  // 转派目标不可为作者本人或池内已有的人
   const notTargetable = (c) =>
-    c.user_id === a.assignedUserId || c.user_id === data.question.creatorId
+    a.assignedUserIds.includes(c.user_id) || c.user_id === data.question.creatorId
   const candidates = data.candidates.filter((c) => !notTargetable(c))
 
   // 默认值：首个非本人者，取一次即可。放在打开对话框的处理器里算——
@@ -194,7 +196,7 @@ export function ReviewDetail({ data }) {
       {/* 待指派提示（管理员可见转派） */}
       {noAssignee && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-          该任务暂无处理人（可能因任命缺失/唯一候选冲突）。请转派给可用{data.approval.stage === "group" ? "组长" : "专家"}
+          该任务暂无处理人（该节点尚未任命{data.approval.stage === "group" ? "教研组长" : "市级专家"}）。请转派给可用{data.approval.stage === "group" ? "组长" : "专家"}
           {data.canTransfer ? "，或由管理员在下方操作。" : "，请联系系统管理员。"}
         </div>
       )}
@@ -203,7 +205,7 @@ export function ReviewDetail({ data }) {
       {data.canAct && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
           <p className="mr-auto text-sm">
-            当前任务处理人：<span className="font-medium">{a.assignedName || data.selfName}</span>
+            当前任务处理人：<span className="font-medium">{assignedLabel || data.selfName}</span>
             <span className="ml-2 text-xs text-muted-foreground">通过可附意见；退回须填意见</span>
           </p>
           <Button size="sm" variant="outline" onClick={openTransfer} disabled={Boolean(busy)}>
@@ -316,9 +318,9 @@ export function ReviewDetail({ data }) {
                     <span className="text-muted-foreground">
                       {t.kind !== "content" ? `（${t.kind === "offline" ? "下线申请" : "恢复申请"}）` : ""}
                     </span>
-                    {t.assignedName && !t.decidedBy && (
+                    {t.assignedNames.length > 0 && !t.decidedBy && (
                       <span className="text-muted-foreground">
-                        待处理 · {t.assignedName} {fmtDateTime24(t.createdAt)}
+                        待处理 · {t.assignedNames.join("、")} {fmtDateTime24(t.createdAt)}
                       </span>
                     )}
                     {t.decidedByName && (

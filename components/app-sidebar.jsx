@@ -35,6 +35,7 @@ import {
   Building2Icon,
   ChevronsUpDownIcon,
   FileTextIcon,
+  FileStackIcon,
   FileUpIcon,
   GitBranchIcon,
   InboxIcon,
@@ -47,6 +48,7 @@ import {
   TagsIcon,
   CircleUserRoundIcon,
   DownloadIcon,
+  SparklesIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -71,6 +73,16 @@ function useNavItems(
         ]
       : []),
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
+    // 组卷库对所有登录用户可见（与题库同口径：已入库试卷全市共享，学生也能看）
+    { title: "组卷库", url: "/papers", icon: FileStackIcon },
+    // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
+    // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
+    {
+      title: "AI 答疑",
+      url: "https://duck.ai/",
+      icon: SparklesIcon,
+      external: true,
+    },
   ];
   if (isAdmin || isSchoolAdmin || isApprover) {
     // 角标＝分给我待处理的任务数（Gmail 式），处理完 router.refresh() 会重算
@@ -115,10 +127,21 @@ function useNavItems(
 
 function NavRow({ item, pathname }) {
   const Icon = item.icon;
-  const active = pathname === item.url || pathname.startsWith(`${item.url}/`);
+  // 站外链接不参与高亮，也不能用 next/link（它会去 prefetch 一个外域路由）
+  const active =
+    !item.external && (pathname === item.url || pathname.startsWith(`${item.url}/`));
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton render={<Link href={item.url} />} isActive={active}>
+      <SidebarMenuButton
+        render={
+          item.external ? (
+            <a href={item.url} target="_blank" rel="noreferrer" />
+          ) : (
+            <Link href={item.url} />
+          )
+        }
+        isActive={active}
+      >
         <Icon className="shrink-0" />
         <span>{item.title}</span>
       </SidebarMenuButton>

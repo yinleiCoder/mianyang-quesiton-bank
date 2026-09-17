@@ -16,7 +16,7 @@ export type Database = {
     Tables: {
       approvals: {
         Row: {
-          assigned_user_id: string | null
+          assigned_user_ids: string[]
           comment: string | null
           created_at: string
           decided_at: string | null
@@ -29,7 +29,7 @@ export type Database = {
           version_id: string | null
         }
         Insert: {
-          assigned_user_id?: string | null
+          assigned_user_ids?: string[]
           comment?: string | null
           created_at?: string
           decided_at?: string | null
@@ -42,7 +42,7 @@ export type Database = {
           version_id?: string | null
         }
         Update: {
-          assigned_user_id?: string | null
+          assigned_user_ids?: string[]
           comment?: string | null
           created_at?: string
           decided_at?: string | null

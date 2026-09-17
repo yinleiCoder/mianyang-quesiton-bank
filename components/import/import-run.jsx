@@ -167,6 +167,8 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
             genAnalysis: job.gen_analysis,
             defaultQtype: job.default_qtype,
             defaultDifficulty: job.default_difficulty,
+            // 整卷还原：提示词换成 PAPER_TAIL，并让 normalizePage 额外抽卷头/大题/分值
+            paperMode: job.mode === "paper",
           },
           // 每页落库就把服务端回传的进度并进本地状态（不查库）——先跑完的那页立刻变绿
           onPageSaved: (saved) =>

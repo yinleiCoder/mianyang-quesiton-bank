@@ -70,12 +70,74 @@ function OptionRow({ letter, block, correct }) {
   )
 }
 
-// 单题渲染（根题或子题）。qtype 必传；content 为该题内容（子题为 content.sub[] 元素）
-export function QuestionBody({ qtype, content, showAnswer = false, prefix = "" }) {
+// 卷面用的一行选项：没有边框、没有底色，长的自动占满整行。
+// 真题卷面的选项就是这个样子——边框卡片是屏幕上的辅助，印在纸上只是噪声。
+function PaperOption({ letter, block, correct }) {
+  const text = blocksToText(block)
+  // 选项短就两列并排，长的一行放不下就占满整行
+  const span = text.length > 14 ? "col-span-2" : ""
+  return (
+    <div className={`flex items-start gap-1.5 ${span} ${correct ? "font-medium" : ""}`}>
+      <span className="shrink-0 tabular-nums">{letter}.</span>
+      <div className="min-w-0 flex-1">
+        <BlockList blocks={block} />
+      </div>
+    </div>
+  )
+}
+
+// 单题渲染（根题或子题）。qtype 必传；content 为该题内容（子题为 content.sub[] 元素）。
+// variant="paper" 时按**卷面**排版：选项两列、去掉"选项"小标题、收紧行距。
+export function QuestionBody({ qtype, content, showAnswer = false, prefix = "", variant }) {
   const c = content ?? {}
   const answer = c.answer ?? {}
   const isChoice = qtype === "single_choice" || qtype === "multiple_choice"
   const answerKeys = new Set(Array.isArray(answer.keys) ? answer.keys : [])
+  const isPaper = variant === "paper"
+
+  if (isPaper) {
+    return (
+      <div className="space-y-1.5">
+        <div className="font-medium leading-relaxed">
+          <BlockList blocks={c.stem} />
+        </div>
+        {isChoice && (c.options?.length ?? 0) > 0 && (
+          <div className="grid grid-cols-2 gap-x-8 gap-y-0.5 pl-4">
+            {(c.options ?? []).map((o, i) => (
+              <PaperOption
+                key={o.key ?? i}
+                letter={o.key ?? String.fromCharCode(65 + i)}
+                block={o.label}
+                correct={showAnswer && answerKeys.has(o.key)}
+              />
+            ))}
+          </div>
+        )}
+        {showAnswer && isChoice && answerKeys.size > 0 && (
+          <p className="pl-4">正确答案：{<b>{[...answerKeys].join("、")}</b>}</p>
+        )}
+        {showAnswer && qtype === "true_false" && (
+          <p className="pl-4">
+            正确答案：
+            <b>{answer.value === true ? "正确" : answer.value === false ? "错误" : "—"}</b>
+          </p>
+        )}
+        {showAnswer && qtype === "fill_blank" && (
+          <p className="pl-4">参考答案：{(answer.values ?? []).map((x, i) => `${i + 1}. ${x}`).join("　")}</p>
+        )}
+        {showAnswer && qtype === "short_answer" && (
+          <div className="pl-4">
+            {(answer.samples ?? []).map((s, i) => (
+              <p key={i} className="whitespace-pre-wrap">
+                {s}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       <div className="text-sm font-medium leading-relaxed">
@@ -133,43 +195,54 @@ export function QuestionBody({ qtype, content, showAnswer = false, prefix = "" }
 }
 
 // 整卷渲染：六题型统一入口。composite 渲染材料 + 子题列表
-export function QuestionView({ qtype, content, showAnswer = false }) {
+export function QuestionView({ qtype, content, showAnswer = false, variant }) {
   const c = content ?? {}
   const subs = Array.isArray(c.sub) ? c.sub : []
+  const isPaper = variant === "paper"
+
   if (qtype === "composite") {
     return (
-      <div className="space-y-5">
-        {blocksToText(c.stem).trim() && (
-          <div className="rounded-lg border-l-4 border-primary/40 bg-muted/30 py-2 pl-3 pr-2 text-sm leading-relaxed">
-            <BlockList blocks={c.stem} />
-          </div>
-        )}
-        <div className="space-y-5">
+      <div className={isPaper ? "space-y-2" : "space-y-5"}>
+        {blocksToText(c.stem).trim() &&
+          (isPaper ? (
+            <div className="leading-relaxed">
+              <BlockList blocks={c.stem} />
+            </div>
+          ) : (
+            <div className="rounded-lg border-l-4 border-primary/40 bg-muted/30 py-2 pl-3 pr-2 text-sm leading-relaxed">
+              <BlockList blocks={c.stem} />
+            </div>
+          ))}
+        <div className={isPaper ? "space-y-2" : "space-y-5"}>
           {subs.map((sub, i) => (
-            <div key={i} className="space-y-2">
+            <div key={i} className="space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="outline">子题 {i + 1}</Badge>
-                <span className="text-xs text-muted-foreground">{qtypeLabel(sub.type)}</span>
+                {/* 卷面上子题要标"（1）（2）"，不能标"子题 1"——那是编辑器的话 */}
+                <span className="font-medium tabular-nums">{isPaper ? `（${i + 1}）` : `子题 ${i + 1}`}</span>
+                {!isPaper && <span className="text-xs text-muted-foreground">{qtypeLabel(sub.type)}</span>}
               </div>
-              <QuestionBody qtype={sub.type} content={sub} showAnswer={showAnswer} />
+              <QuestionBody qtype={sub.type} content={sub} showAnswer={showAnswer} variant={variant} />
             </div>
           ))}
         </div>
         {showAnswer && blocksToText(c.analysis).trim() && (
-          <div className="rounded-lg bg-muted/60 p-3 text-sm">
-            <p className="mb-1 font-medium text-muted-foreground">解析</p>
+          <div className={isPaper ? "pl-4" : "rounded-lg bg-muted/60 p-3 text-sm"}>
+            {!isPaper && <p className="mb-1 font-medium text-muted-foreground">解析</p>}
+            {isPaper && <span className="mr-1">解析：</span>}
             <BlockList blocks={c.analysis} />
           </div>
         )}
       </div>
     )
   }
+
   return (
-    <div className="space-y-4">
-      <QuestionBody qtype={qtype} content={c} showAnswer={showAnswer} />
+    <div className={isPaper ? "space-y-1.5" : "space-y-4"}>
+      <QuestionBody qtype={qtype} content={c} showAnswer={showAnswer} variant={variant} />
       {showAnswer && blocksToText(c.analysis).trim() && (
-        <div className="rounded-lg bg-muted/60 p-3 text-sm">
-          <p className="mb-1 font-medium text-muted-foreground">解析</p>
+        <div className={isPaper ? "pl-4" : "rounded-lg bg-muted/60 p-3 text-sm"}>
+          {!isPaper && <p className="mb-1 font-medium text-muted-foreground">解析</p>}
+          {isPaper && <span className="mr-1">解析：</span>}
           <BlockList blocks={c.analysis} />
         </div>
       )}

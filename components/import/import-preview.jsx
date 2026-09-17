@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ImportItemEditor } from "@/components/import/import-item-editor"
+import { BuildPaperButton } from "@/components/papers/build-paper-button"
 import {
   CheckCircle2Icon,
   Loader2Icon,
@@ -225,13 +226,19 @@ export function ImportPreview({ job, items, onRefresh }) {
           {busy ? <Loader2Icon className="size-4 animate-spin" /> : <CheckCircle2Icon className="size-4" />}
           确认入库，生成草稿
         </Button>
+        {/* 整卷还原模式下多给一个出口：入库 + 按大题/分值排成一份试卷草稿（0050） */}
+        {job.mode === "paper" && (
+          <BuildPaperButton job={job} items={items} keptIds={keptIds} onRefresh={onRefresh} />
+        )}
         {progress && (
           <span className="text-xs text-muted-foreground">
             已处理 {progress.done}/{progress.total}
           </span>
         )}
         <span className="text-xs text-muted-foreground">
-          生成的草稿在「我的题目」里，还要你手动提交才会进审核。
+          {job.mode === "paper"
+            ? "「一键成卷」会先把题目入库，再按解析出的大题与分值还原成试卷草稿。"
+            : "生成的草稿在「我的题目」里，还要你手动提交才会进审核。"}
         </span>
       </div>
 
@@ -282,7 +289,8 @@ export function ImportPreview({ job, items, onRefresh }) {
                     className={`rounded px-1.5 py-0.5 ${
                       f === "answer_missing" || f === "blank_mismatch"
                         ? "bg-rose-100 text-rose-700"
-                        : f === "ai_analysis"
+                        : f === "ai_analysis" || f === "ai_answer"
+                          // AI 生成的内容统一用紫色：它们不是原卷内容，需要人负核对责任
                           ? "bg-violet-100 text-violet-700"
                           : "bg-amber-100 text-amber-700"
                     }`}
@@ -301,6 +309,20 @@ export function ImportPreview({ job, items, onRefresh }) {
                 {it.status === "failed" && (
                   <span className="rounded bg-rose-100 px-1.5 py-0.5 text-rose-700" title={it.error ?? ""}>
                     入库失败
+                  </span>
+                )}
+                {/* 整卷还原：把解析出的大题与分值显示出来。
+                    这两项直接决定成卷后的卷面结构，抽错了要在这里就看得见，
+                    而不是等进了编辑器才发现所有题都堆在一个大题里 */}
+                {it.section_title && (
+                  <span className="rounded bg-sky-100 px-1.5 py-0.5 text-sky-700" title="解析出的大题">
+                    {it.section_title}
+                  </span>
+                )}
+                {it.score != null && (
+                  <span className="rounded bg-teal-100 px-1.5 py-0.5 text-teal-700">
+                    {Number(it.score)} 分
+                    {it.score_mode === "per_blank" ? "（每空）" : it.score_mode === "per_sub" ? "（每小问）" : ""}
                   </span>
                 )}
                 <span className="ml-auto flex items-center gap-1">

@@ -69,10 +69,12 @@ async function AppSidebarData() {
     // 走 idx_approvals_inbox 那条部分索引，比拉一遍列表便宜得多。
     // 组长/专家/管理员之外的账号没有这条导航，也就不查。
     try {
+      // 走统一收件箱视图：题目与试卷两类待办都要算进角标，
+      // 只查 approvals 会让新提交的试卷"提交了但角标不动"，而且不报错
       const { count } = await supabase
-        .from("approvals")
+        .from("approval_inbox")
         .select("id", { count: "exact", head: true })
-        .eq("assigned_user_id", ctx.user.id)
+        .contains("assigned_user_ids", [ctx.user.id])
         .eq("state", "waiting")
       openReviews = count ?? 0
     } catch {

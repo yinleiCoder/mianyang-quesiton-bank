@@ -12,6 +12,7 @@ import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { SOURCE_KINDS, jobStateChip } from "@/lib/import-jobs"
+import { docxWindow } from "@/lib/docx-client"
 import { trialParse } from "@/lib/import-parse-client"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { Button } from "@/components/ui/button"
@@ -60,6 +61,8 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
   const [tags, setTags] = useState([]) // TagPicker 的值是 {id,name} 对象数组，入库前要 .map(t => t.id)
   const [difficulty, setDifficulty] = useState(2)
   const [genAnalysis, setGenAnalysis] = useState(true)
+  // 整卷还原模式：提示词换成 PAPER_TAIL，额外抽卷头/大题/分值，解析完可「一键成卷」
+  const [paperMode, setPaperMode] = useState(false)
   const [busy, setBusy] = useState("")
   const [trial, setTrial] = useState(null)
   // 没有密钥就整块禁用（本功能不提供公共密钥，见 DeepSeekSettingsPanel）。
@@ -156,7 +159,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
       // 有自己的密钥就浏览器直连上游（密钥不经过本站服务器），否则走站点兜底
       const json = await trialParse({
         page,
-        opts: { gen_analysis: genAnalysis, default_difficulty: difficulty },
+        opts: { genAnalysis, defaultDifficulty: difficulty, paperMode },
       })
       const r = json.results?.[0]
       setTrial({ pageNo: from, mode: json.mode, ...r })
@@ -193,6 +196,11 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
         p_defaults: { gen_analysis: genAnalysis, difficulty },
       })
       if (error) throw new Error(error.message)
+      // 模式另走一个小 RPC：import_create_job 改签名要 drop 旧函数，风险不值当
+      if (paperMode) {
+        const { error: modeErr } = await supabase.rpc("import_set_paper_mode", { p_job_id: jobId })
+        if (modeErr) throw new Error(modeErr.message)
+      }
       toast.success("任务已创建，开始解析")
       onCreated(jobId)
     } catch (err) {
@@ -378,6 +386,33 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
           />
           原卷没有解析时，让模型补写一段解析（会在解析上标记「AI 解析」）
         </label>
+        <label className="mt-2 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={paperMode}
+            onChange={(e) => setPaperMode(e.target.checked)}
+            className="mt-0.5 size-4"
+          />
+          <span>
+            这是一份<strong>完整试卷</strong>，按整卷还原
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              会额外抽取卷头（考试名称/时长/总分）、大题分节与每题分值，解析完可以「一键成卷」；
+              题目本身仍然照常先进题库草稿、走两级审核。
+            </span>
+          </span>
+        </label>
+        {/* 答案规则（0054 起）：原卷有答案照抄；没有就由模型自己解出来并标成
+            「AI 推导答案」，教师在校对页逐题核对或改写。这里先说清楚，
+            免得教师以为紫色标记是解析出错。 */}
+        <p className="mt-3 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+          <strong>答案怎么来。</strong>
+          原卷上有答案就照抄；<strong>没有的话模型会自己把题解出来</strong>，标成
+          「AI 推导答案」并在解析里写出推导过程，供你核对。实在解不出的会标成「缺答案」，
+          入库时被数据库拦下，需要你手工补。
+          <span className="mt-0.5 block">
+            所以：原卷没答案也能用，但校对页的核对工作会更多——AI 推的答案请务必看一遍推导再放行。
+          </span>
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -455,9 +490,18 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
     return { page_no: pageNo, mode: "vision", images: [{ data_url: img.dataUrl, w: 0, h: 0 }], detail }
   }
   if (file.kind === "docx") {
-    // Word 没有页：这里把若干段落拼成一批，range 的"页"即段落序号
-    const text = file.doc.paragraphs.slice(Math.max(0, pageNo - 1), pageNo + 4).join("\n")
-    return { page_no: pageNo, mode: "text", text, note: "本批为 Word 段落" }
+    // Word 没有页：这里把若干段落拼成一批，range 的"页"即段落序号。
+    // 窗口边界要按内容对齐——固定切 5 段会把"题干在窗口内、选项在窗口外"的题切出来，
+    // 那种题在入库时必然被判为缺选项（见 lib/docx-client.js 的 docxWindow）
+    const win = docxWindow(file.doc.paragraphs, pageNo)
+    return {
+      page_no: pageNo,
+      mode: "text",
+      text: win.text,
+      note: win.extendedForward > 0 || win.extendedBackward > 0
+        ? `本批为 Word 段落（为对齐题目边界，向${win.extendedBackward > 0 ? "前 " + win.extendedBackward + " 段" : ""}${win.extendedBackward > 0 && win.extendedForward > 0 ? "、" : ""}${win.extendedForward > 0 ? "后 " + win.extendedForward + " 段" : ""}扩了窗口）`
+        : "本批为 Word 段落",
+    }
   }
   if (!file.handle) throw new Error("PDF 句柄已失效，请重新选择文件")
   const p = await file.handle.probe(pageNo)

@@ -40,11 +40,12 @@ export const getBankCount = cache(async () => {
 
 export const getMyWaiting = cache(async () => {
   const ctx = await getAuthContext()
+  // 统一收件箱视图：题目与试卷两类待办都算进来（与侧栏角标同口径）
   const { count, error } = await (await createClient())
-    .from("approvals")
+    .from("approval_inbox")
     .select("id", { count: "exact", head: true })
     .eq("state", "waiting")
-    .eq("assigned_user_id", ctx.user?.id ?? "")
+    .contains("assigned_user_ids", [ctx.user?.id ?? ""])
   if (error) throw error
   return count ?? 0
 })
@@ -56,7 +57,8 @@ export const getAdminStats = cache(async () => {
     supabase.from("profiles").select("user_id", { count: "exact", head: true }),
     supabase.from("subject_nodes").select("id", { count: "exact", head: true }),
     supabase.from("tags").select("id", { count: "exact", head: true }),
-    supabase.from("approvals").select("id", { count: "exact", head: true }).eq("state", "waiting").is("assigned_user_id", null),
+    // 待指派 = 处理人池为空的在途任务（题目与试卷都要看到，否则管理员会漏派试卷）
+    supabase.from("approval_inbox").select("id", { count: "exact", head: true }).eq("state", "waiting").eq("assigned_user_ids", "{}"),
   ])
   return {
     schools: schoolsC.count ?? 0,

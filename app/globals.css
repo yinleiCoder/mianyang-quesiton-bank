@@ -128,3 +128,16 @@
     @apply font-sans;
   }
 }
+/* 打印：试卷/题目打印页共用 A4 版式。
+   放在 @layer base 之外，确保打印时不被 Tailwind 的工具类优先级盖掉。 */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+  /* 深色主题下打印会得到白字白底，强制回黑字白底 */
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+}

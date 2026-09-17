@@ -12,7 +12,7 @@ import { QuestionReader } from "@/components/bank/question-reader"
 import { PersonChip } from "@/components/bank/person-chip"
 import { AccessDenied } from "@/components/access-denied"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeftIcon, SparklesIcon } from "lucide-react"
+import { ArrowLeftIcon, PrinterIcon, SparklesIcon } from "lucide-react"
 
 export const metadata = { title: "题目详情" }
 
@@ -67,12 +67,21 @@ export default async function BankQuestionPage({ params }) {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-4">
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Link
           href="/bank"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeftIcon className="size-4" /> 返回题库
+        </Link>
+        {/* 打印页是独立路由（没有侧栏/页头），新标签打开——当前页仍留着继续看 */}
+        <Link
+          href={`/print/question/${q.id}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <PrinterIcon className="size-4" /> 打印这道题
         </Link>
       </div>
 

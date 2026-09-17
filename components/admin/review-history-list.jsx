@@ -24,7 +24,7 @@ import {
 
 export function ReviewHistoryList({ rows, users }) {
   const router = useRouter()
-  const [target, setTarget] = useState(null) // { approvalId, assignedName }
+  const [target, setTarget] = useState(null) // { approvalId, assignedName, isPaper }
   const [toUser, setToUser] = useState("")
   const [busy, setBusy] = useState(false)
 
@@ -32,10 +32,12 @@ export function ReviewHistoryList({ rows, users }) {
     if (!target || !toUser) return
     setBusy(true)
     const supabase = createClient()
-    const { error } = await supabase.rpc("transfer_approval", {
-      p_approval_id: target.approvalId,
-      p_to_user: toUser,
-    })
+    // 试卷任务必须走自己的转派函数：transfer_approval 读的是 questions 表，
+    // 对试卷任务会静默地按题目语义执行（学校管理员被无声拒绝）
+    const { error } = await supabase.rpc(
+      target.isPaper ? "transfer_paper_approval" : "transfer_approval",
+      { p_approval_id: target.approvalId, p_to_user: toUser }
+    )
     setBusy(false)
     if (error) {
       toast.error(error.message)
@@ -86,14 +88,14 @@ export function ReviewHistoryList({ rows, users }) {
                     {(r.schoolName || r.creatorName) && (
                       <span>
                         {r.schoolName}
-                        {r.creatorName ? ` · 作者 ${r.creatorName}` : ""}
+                        {r.creatorName ? ` · ${r.target === "paper" ? "组卷" : "作者"} ${r.creatorName}` : ""}
                       </span>
                     )}
                   </div>
 
                   {r.state === "waiting" ? (
                     <p className="text-xs">
-                      {r.assignedUserId ? (
+                      {r.assignedUserIds.length > 0 ? (
                         <>
                           处理人：<span className="font-medium text-foreground">{r.assignedName || "（已注销用户）"}</span>
                         </>
@@ -128,8 +130,13 @@ export function ReviewHistoryList({ rows, users }) {
                       size="sm"
                       variant="secondary"
                       onClick={() => {
-                        setTarget({ approvalId: r.id, assignedName: r.assignedName || "（无人）" })
-                        setToUser(r.assignedUserId ?? "")
+                        setTarget({
+                          approvalId: r.id,
+                          assignedName: r.assignedName || "（无人）",
+                          isPaper: r.target === "paper",
+                        })
+                        // 默认选中"池里唯一的那位"（多位时留空，由管理员自己选）
+                        setToUser(r.assignedUserIds.length === 1 ? r.assignedUserIds[0] : "")
                       }}
                     >
                       <SendIcon className="size-3.5" /> 转派
