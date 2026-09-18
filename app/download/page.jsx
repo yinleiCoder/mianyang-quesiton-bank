@@ -35,12 +35,23 @@ export const metadata = {
 
 const REPO = "yinleiCoder/mianyang-quiz"
 const RELEASES = `https://github.com/${REPO}/releases`
-// 资产名固定（不带版本号），所以这三个链接长期有效
+// 资产名固定（不带版本号），所以这几个链接长期有效
 const APK_URL = `${RELEASES}/latest/download/mianyang_quiz-android.apk`
-const ZIP_URL = `${RELEASES}/latest/download/mianyang_quiz-windows-x64.zip`
+// Asset 名与客户端仓库流水线里的**逐字一致**（那边特意不带版本号）。
+// Windows 默认给**安装包**：双击装完，自动建桌面快捷方式，不需要管理员权限，
+// 也不用管 C 运行库（随包带着）。zip 留给需要绿色版的人，是次要入口。
+const WIN_SETUP_ASSET = "mianyang_quiz-windows-x64-setup.exe"
+const WIN_ZIP_ASSET = "mianyang_quiz-windows-x64.zip"
+const WIN_SETUP_URL = `${RELEASES}/latest/download/${WIN_SETUP_ASSET}`
+const WIN_ZIP_URL = `${RELEASES}/latest/download/${WIN_ZIP_ASSET}`
 
-// 最近一个 Release 的版本号，只用于展示；取不到（还没发过版、或接口限流）就返回 null，
-// 页面照常显示，不因为一个装饰性字段把整页拖垮。
+// 最近一个 Release 的版本号与**它实际带了哪些资产**。
+// 取不到（还没发过版、或接口限流）就返回 null，页面照常显示，
+// 不因为一个装饰性字段把整页拖垮。
+//
+// 为什么要看资产列表：安装包是后加的资产，**比它更早的 Release 里只有 zip**。
+// 而 `/releases/latest/download/<名字>` 在资产不存在时是 **404** ——
+// 不查就点，用户拿到的是一个死链（安装器那一步构建失败时也会出现这种情况）。
 async function latestRelease() {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
@@ -48,10 +59,28 @@ async function latestRelease() {
     })
     if (!res.ok) return null
     const data = await res.json()
-    return { tag: data.tag_name, publishedAt: data.published_at }
+    const names = new Set((data.assets ?? []).map((a) => a.name))
+    return {
+      tag: data.tag_name,
+      publishedAt: data.published_at,
+      hasSetup: names.has(WIN_SETUP_ASSET),
+      hasZip: names.has(WIN_ZIP_ASSET),
+    }
   } catch {
     return null
   }
+}
+
+/// Windows 主按钮该指向哪：优先安装包，退而求其次压缩包，再不行去 Release 页自己找。
+///
+/// **查不到资产列表时（release 为 null）选 zip**：那说明接口挂了或被限流，
+/// 而 zip 是历来每个版本都有、几乎不会缺的那个。宁可给用户一个能用的旧形态，
+/// 也不要赌一个可能 404 的链接。
+function windowsDownload(release) {
+  if (!release) return { url: WIN_ZIP_URL, setup: false }
+  if (release.hasSetup) return { url: WIN_SETUP_URL, setup: true }
+  if (release.hasZip) return { url: WIN_ZIP_URL, setup: false }
+  return { url: RELEASES, setup: false }
 }
 
 const FEATURES = [
@@ -65,6 +94,7 @@ const FEATURES = [
 
 export default async function DownloadPage() {
   const release = await latestRelease()
+  const win = windowsDownload(release)
 
   return (
     <div className="relative flex min-h-svh flex-1 flex-col bg-muted/40">
@@ -138,18 +168,42 @@ export default async function DownloadPage() {
               <CardDescription>Windows 10/11 64 位桌面端</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* 不再用 variant="secondary"：安装包现在是推荐路径，
+                  灰按钮会让人以为它是次选。 */}
               <Button
                 className="w-full"
-                variant="secondary"
                 nativeButton={false}
-                render={<a href={ZIP_URL} />}
+                render={<a href={win.url} />}
               >
-                <DownloadIcon className="size-4" /> 下载压缩包
+                <DownloadIcon className="size-4" />
+                {win.setup ? "下载安装包" : "下载压缩包"}
               </Button>
-              <p className="text-xs text-muted-foreground">
-                解压后运行目录里的 exe（<span className="font-medium">整个目录一起解压</span>，只拷 exe 打不开）；
-                若提示缺少 vcruntime140.dll，装一次 Microsoft Visual C++ 运行库。
-              </p>
+
+              {win.setup ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    双击安装即可，会自动创建桌面与开始菜单快捷方式；
+                    <span className="font-medium">不需要管理员权限</span>，电脑上也不用另装运行库。
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    免安装版：
+                    <a
+                      href={WIN_ZIP_URL}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      下载压缩包
+                    </a>
+                    （解压后运行整个目录里的 exe，只拷 exe 打不开）
+                  </p>
+                </>
+              ) : (
+                // 走到这里说明**这个版本还没有安装包**（更早的 Release，或安装器那步构建失败）。
+                // 文案要跟着换 —— 按钮上写着"下载压缩包"却还教人"双击安装"就成了驴唇不对马嘴。
+                <p className="text-xs text-muted-foreground">
+                  解压后运行目录里的 exe（<span className="font-medium">整个目录一起解压</span>，
+                  只拷 exe 打不开）。下次发布起会提供双击即装的安装包。
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
