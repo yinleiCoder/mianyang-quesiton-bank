@@ -89,6 +89,23 @@ gr as (select format('GRANT %s ON %s public.%I TO %s;', a.privilege_type, r.kw, 
 select stmt from (select * from rev union all select * from gr) t order by relname, ord, stmt;" \
   > "$BACKUP/fix-acl-rel.sql"
 
+# 列级授权单独一趟 —— 它存在 pg_attribute.attacl 里，**不在 relacl 里**，
+# 上面那趟看不见它（`grant select (id, name) on tags to anon` 就是这种，见 0040）。
+# 恢复顺序要紧：`REVOKE ALL ON TABLE` 会连列级授权一起清掉，
+# 所以这个脚本必须在 fix-acl-rel.sql **之后**跑（2-import.sh 里已排好）。
+pg psql "$OLD_DB_URL" -Atc "
+select stmt from (
+  select format('GRANT %s (%s) ON TABLE public.%I TO %s;', a.privilege_type, att.attname, c.relname, coalesce(g.rolname,'PUBLIC')) stmt,
+         c.relname rn, att.attnum an, coalesce(g.rolname,'PUBLIC') rl
+  from pg_attribute att
+    join pg_class c on c.oid=att.attrelid
+    cross join aclexplode(att.attacl) a
+    left join pg_roles g on g.oid=a.grantee
+  where c.relnamespace='public'::regnamespace
+    and att.attacl is not null and att.attnum>0 and not att.attisdropped
+) t order by rn, an, rl, stmt;" \
+  > "$BACKUP/fix-acl-col.sql"
+
 echo
 echo "导出完成："
 ls -lh "$BACKUP" | tail -n +2 | awk '{print "  " $9 "  " $5}'

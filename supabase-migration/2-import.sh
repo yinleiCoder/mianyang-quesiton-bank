@@ -51,6 +51,16 @@ for f in fix-acl-func.sql fix-acl-rel.sql; do
   psql_new -q -f - < "$BACKUP/$f" && echo "  $f  OK"
 done
 
+# 列级授权必须**最后**补：上面每条 `REVOKE ALL ON TABLE` 会把 attacl 里的列级授权一并清掉，
+# 而 rel 脚本是按 relacl 还原的、根本看不见列级授权 —— tags 就这么丢过
+# `anon select(id,name)`（0040），表现是题库页 42501 permission denied for table tags。
+# 库里没有列级授权时这个文件是空的，跳过即可。
+if [[ -s "$BACKUP/fix-acl-col.sql" ]]; then
+  psql_new -q -f - < "$BACKUP/fix-acl-col.sql" && echo "  fix-acl-col.sql  OK"
+else
+  echo "  fix-acl-col.sql  空（旧库没有列级授权），跳过"
+fi
+
 echo "==> [5/5] 刷 PostgREST 的 schema 缓存"
 psql_new -c "notify pgrst, 'reload schema';"
 

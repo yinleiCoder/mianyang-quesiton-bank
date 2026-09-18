@@ -125,7 +125,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 | 索引 | 107 / 107 |
 | auth 用户 / 身份 | 44 / 44 |
 | 数据 | questions 152、profiles 44、practice_answers 6464、audit_log 980 —— 全部一致 |
-| 对象 ACL | 函数 162 + 表/视图/序列 32 —— **0 差异** |
+| 对象 ACL | 函数 162 + 表/视图/序列 32 + **列级 1 处**（tags 的 id/name）—— **0 差异** |
 | 安全姿态 | anon 可执行函数 6（全是触发器函数）、可读表 3 —— 与旧库一致 |
 
 ## 过程中修掉的一个真问题
@@ -137,7 +137,30 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 于是 `0006_revoke_extra_roles.sql` 的加固整个失效，表的授权同理（32 个对象全不一致）。
 
 修法：从**旧库**用 `aclexplode()` 反向生成精确的 REVOKE+GRANT 脚本补回去 ——
-产物是 `backup/fix-acl-func.sql`（571 条）和 `backup/fix-acl-rel.sql`（574 条）。
+产物是 `backup/fix-acl-func.sql`（571 条）、`backup/fix-acl-rel.sql`（574 条）
+和 `backup/fix-acl-col.sql`（列级授权，见下）。
+
+### 补记（2026-09-18 迁移后发现的漏网之鱼）：列级授权不住在 relacl 里
+
+上面的脚本只覆盖了 `proacl` / `relacl`，于是**列级授权**漏了 ——
+`grant select (id, name) on public.tags to anon`（0040）存的是 `pg_attribute.attacl`，
+`relacl` 里一个 anon 都看不到。更糟的是 `fix-acl-rel.sql` 里每条
+`REVOKE ALL ON TABLE ...` 会把 `attacl` 的列级授权**一并清掉**
+（第 3 步从 pg_dump 正确还原的那条也被它带走了），再按 relacl 授权时自然补不回来。
+
+症状：题库页 `/bank` 报 `42501 permission denied for table tags`
+（PostgREST 查 `select id, name from tags order by name`，角色 anon）。
+`schools` / `subject_nodes` 没事，它们的授权是表级的、在 relacl 里。
+
+修法与核对：`GRANT SELECT (id) ON TABLE public.tags TO anon;` + `(name)` —— 现在由
+`1-export.sh` 生成 `fix-acl-col.sql`、`2-import.sh` 在 rel 脚本**之后**单独跑一趟。
+核对口径要连列级一起看，别只看 relacl：
+
+```sql
+select c.relname, c.relacl, a.attname, a.attacl
+from pg_class c left join pg_attribute a on a.attrelid=c.oid and a.attacl is not null
+where c.relnamespace='public'::regnamespace and (c.relacl is not null or a.attacl is not null);
+```
 
 ## 三个确认过、**不是**问题的点（核对时容易误判）
 
