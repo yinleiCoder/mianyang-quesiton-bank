@@ -38,6 +38,7 @@ import {
   FileTextIcon,
   FileStackIcon,
   FileUpIcon,
+  FlagIcon,
   GitBranchIcon,
   GraduationCapIcon,
   InboxIcon,
@@ -63,6 +64,7 @@ function useNavItems(
   isTeacher,
   openFeedback = 0,
   openReviews = 0,
+  openReports = 0,
 ) {
   // 主菜单随里程碑追加：M4 审批收件箱（组长/专家/管理员见）、M5 全市题库
   // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
@@ -73,6 +75,19 @@ function useNavItems(
           { title: "我的题目", url: "/questions", icon: FileTextIcon },
           // AI 解析也是教师专属：它会生成调用者名下的草稿
           { title: "AI智能解析题库资料", url: "/questions/import", icon: FileUpIcon },
+        ]
+      : []),
+    // 题目反馈（学生纠错）的处理入口。
+    // **不能塞进上面那个 isTeacher 块** —— 学校管理员未必是教师身份，
+    // 但作者离职后正是他们兜底处理，漏掉就等于那条链路没人管。
+    ...(isTeacher || isSchoolAdmin || isAdmin
+      ? [
+          {
+            title: "题目反馈",
+            url: "/questions/reports",
+            icon: FlagIcon,
+            badge: openReports,
+          },
         ]
       : []),
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
@@ -177,6 +192,7 @@ export function AppSidebar({
   identity = "teacher",
   openFeedback = 0,
   openReviews = 0,
+  openReports = 0,
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
@@ -188,6 +204,7 @@ export function AppSidebar({
     isTeacher,
     openFeedback,
     openReviews,
+    openReports,
   );
 
   // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）——文案见 lib/roles.js

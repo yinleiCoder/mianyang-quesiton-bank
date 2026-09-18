@@ -5,6 +5,7 @@ import { requireSession, requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadSchools, schoolNameOf } from "@/lib/reference-data"
 import { loadOpenFeedbackCount } from "@/lib/feedback"
+import { loadOpenReportCount } from "@/lib/question-reports"
 import { AppBreadcrumb } from "@/components/app-breadcrumb"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -89,6 +90,19 @@ async function AppSidebarData() {
     }
   }
 
+  // 题目反馈角标单独判断，**不能并进上面的 needsCounts**：
+  // 那个的口径是 isAdmin || isApprover || isSchoolAdmin，**不含普通教师**，
+  // 而普通教师恰恰是题目作者 —— 这个角标最主要的受众。
+  // 能处理反馈的人 = 作者 / 该校学校管理员 / 系统管理员（与服务端 can_handle_question_report 同口径）。
+  let openReports = 0
+  if (ctx.isTeacher || ctx.isSchoolAdmin || ctx.isAdmin) {
+    try {
+      openReports = await loadOpenReportCount(await createClient())
+    } catch {
+      openReports = 0
+    }
+  }
+
   return (
     <AppSidebar
       user={{
@@ -104,6 +118,7 @@ async function AppSidebarData() {
       identity={ctx.identity}
       openFeedback={openFeedback}
       openReviews={openReviews}
+      openReports={openReports}
     />
   )
 }

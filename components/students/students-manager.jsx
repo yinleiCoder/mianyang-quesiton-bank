@@ -49,7 +49,9 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
   const [busy, setBusy] = useState(false)
 
   const schoolMap = useMemo(() => new Map((schools ?? []).map((s) => [s.id, s.name])), [schools])
-  const classMap = useMemo(() => new Map((classes ?? []).map((c) => [c.id, c])), [classes])
+  // 班级字段名以 list_my_student_classes 的返回列为准（class_id / class_name），
+  // 不是 classes 表的 id / name —— 两套名字混用会让下拉全是空选项（0063 的 RPC 列名）
+  const classMap = useMemo(() => new Map((classes ?? []).map((c) => [c.class_id, c])), [classes])
   // 只有能建班的角色能改班级；教师是只读的（SQL 里 admin_* RPC 也会再挡一次，UI 不是边界）
   const canManage = caller.isAdmin || caller.isSchoolAdmin
   // 可选班级限定在能管理的那所学校：系统管理员要按行上的学校分别筛
@@ -143,8 +145,8 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
           >
             <option value="">全部班级</option>
             {(classes ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+              <option key={c.class_id} value={c.class_id}>
+                {c.class_name}
                 {c.is_active ? "" : "（已停用）"} · {c.student_count} 人
               </option>
             ))}
@@ -403,8 +405,8 @@ function AssignDialog({ count, classes, busy, onCancel, onConfirm }) {
             >
               <option value="">请选择…</option>
               {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+                <option key={c.class_id} value={c.class_id}>
+                  {c.class_name}
                 </option>
               ))}
             </select>
@@ -449,9 +451,9 @@ function StudentEditDialog({ student, classes, busy, onCancel, onConfirm }) {
             >
               <option value="">未分班</option>
               {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {student.class_id === c.id ? "（当前）" : ""}
+                <option key={c.class_id} value={c.class_id}>
+                  {c.class_name}
+                  {student.class_id === c.class_id ? "（当前）" : ""}
                 </option>
               ))}
             </select>
