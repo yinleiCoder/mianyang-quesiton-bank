@@ -1,0 +1,4 @@
+# 数据库连接串（含密码）
+.env.migration.local
+# 导出产物：含 auth.users 的密码哈希与全部业务数据
+backup/

@@ -38,6 +38,7 @@ import {
   FileStackIcon,
   FileUpIcon,
   GitBranchIcon,
+  GraduationCapIcon,
   InboxIcon,
   LayoutDashboardIcon,
   LibraryBigIcon,
@@ -50,6 +51,7 @@ import {
   DownloadIcon,
   SparklesIcon,
   UsersIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 
 // 注意：本 shadcn 版本基于 Base UI，组合一律用 `render`（不支持 asChild）。
@@ -75,6 +77,17 @@ function useNavItems(
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
     // 组卷库对所有登录用户可见（与题库同口径：已入库试卷全市共享，学生也能看）
     { title: "组卷库", url: "/papers", icon: FileStackIcon },
+    // 学生名册。放在「导航」而不是「管理台」：教师不是管理员，但他也要看本专业的学生。
+    // 标签按角色变 —— 同一条路由三种口径，服务端各自筛各自的（见 lib/students.js）。
+    ...(isTeacher || isSchoolAdmin || isAdmin
+      ? [
+          {
+            title: isAdmin ? "学生名册" : isSchoolAdmin ? "本校学生" : "我的学生",
+            url: "/students",
+            icon: GraduationCapIcon,
+          },
+        ]
+      : []),
     // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
     // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
     {
@@ -107,6 +120,8 @@ function useNavItems(
       url: "/admin/users",
       icon: UsersIcon,
     });
+    // 班级建设：与系统管理员的「科目树维护」（专业建设）并列，各管一层
+    admin.push({ title: "班级管理", url: "/admin/classes", icon: UsersRoundIcon });
     if (isAdmin) {
       admin.push(
         { title: "标签管理", url: "/admin/tags", icon: TagsIcon },

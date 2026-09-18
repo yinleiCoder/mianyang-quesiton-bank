@@ -5,7 +5,7 @@ import Link from "next/link"
 import { requireUser, getAuthContext } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadPaperVersion, loadPaperHealth, HEALTH_LABEL, paperStatusChip } from "@/lib/paper-workbench"
-import { loadSubjectNodes } from "@/lib/reference-data"
+import { loadSchools, loadSubjectNodes } from "@/lib/reference-data"
 import { indexNodes } from "@/lib/subject-nodes"
 import { loadPeople } from "@/lib/people"
 import { fmtDate } from "@/lib/format"
@@ -54,11 +54,14 @@ export default async function PaperDetailPage({ params }) {
     return <AccessDenied title="试卷还没有内容" description="这份试卷没有任何版本。" />
   }
 
+  // 学校名单先取（走缓存，命中时零往返），再把它传给 loadPeople ——
+  // 否则 loadPeople 内部会为同样那几行再查一次（见 lib/people.js 文件头）。
+  const schools = await loadSchools()
   const [snapshot, health, nodes, people] = await Promise.all([
     loadPaperVersion(supabase, versionId),
     loadPaperHealth(supabase, versionId),
     loadSubjectNodes(),
-    loadPeople(supabase, [paper.creator_id]),
+    loadPeople(supabase, [paper.creator_id], schools),
   ])
   const { pathOf } = indexNodes(nodes)
   const chip = paperStatusChip(snapshot.status)

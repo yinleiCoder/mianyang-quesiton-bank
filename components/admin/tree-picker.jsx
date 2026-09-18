@@ -12,7 +12,7 @@ import { buildTrees, kindLabel, scopeLabel } from "@/lib/subject-nodes"
 
 // 行组件定义在模块级：放在 TreePicker 内部会因每次渲染都产生新的组件类型，
 // 导致整棵子树被卸载重挂（已展开/滚动位置与 DOM 全部重建）。
-function Row({ entry, depth, canPick, onPick }) {
+function Row({ entry, depth, canPick, onPick, blockedLabel }) {
   const { node, children } = entry
   const allowed = canPick(node)
   return (
@@ -27,11 +27,18 @@ function Row({ entry, depth, canPick, onPick }) {
         <span className="truncate font-medium">{node.name}</span>
         <span className="shrink-0 text-xs text-muted-foreground">
           {kindLabel(node.kind)}
-          {node.is_frozen ? "（冻结）" : !allowed ? "（不可挂题）" : ""}
+          {node.is_frozen ? "（冻结）" : !allowed ? blockedLabel : ""}
         </span>
       </button>
       {children.map((c) => (
-        <Row key={c.node.id} entry={c} depth={depth + 1} canPick={canPick} onPick={onPick} />
+        <Row
+          key={c.node.id}
+          entry={c}
+          depth={depth + 1}
+          canPick={canPick}
+          onPick={onPick}
+          blockedLabel={blockedLabel}
+        />
       ))}
     </>
   )
@@ -39,7 +46,18 @@ function Row({ entry, depth, canPick, onPick }) {
 
 // 树形节点选择器：公共/专业两棵静态树，点击行回调所选节点
 // pickable：可选谓词（默认全部可选）；false 的节点置灰不可点（出题时仅可挂题节点可选）
-export function TreePicker({ open, onOpenChange, nodes, onSelect, pickable, title = "选择科目节点", hint }) {
+// blockedLabel：置灰原因的后缀文案。默认「（不可挂题）」是出题场景的说法；
+//   选专业/班级这类场景传「（不可选）」，否则读起来是答非所问。
+export function TreePicker({
+  open,
+  onOpenChange,
+  nodes,
+  onSelect,
+  pickable,
+  title = "选择科目节点",
+  hint,
+  blockedLabel = "（不可挂题）",
+}) {
   const trees = useMemo(() => buildTrees(nodes), [nodes])
   const [scopeTab, setScopeTab] = useState(null)
   const canPick = pickable ?? (() => true)
@@ -90,7 +108,14 @@ export function TreePicker({ open, onOpenChange, nodes, onSelect, pickable, titl
             </p>
           ) : (
             active.trees.map((t) => (
-              <Row key={t.node.id} entry={t} depth={0} canPick={canPick} onPick={pick} />
+              <Row
+                key={t.node.id}
+                entry={t}
+                depth={0}
+                canPick={canPick}
+                onPick={pick}
+                blockedLabel={blockedLabel}
+              />
             ))
           )}
         </div>

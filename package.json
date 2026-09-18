@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "test:import": "node --import ./scripts/alias-loader.mjs scripts/test-import-pipeline.mjs",
-    "test:docx": "node --import ./scripts/alias-loader.mjs scripts/test-docx-window.mjs"
+    "test:docx": "node --import ./scripts/alias-loader.mjs scripts/test-docx-window.mjs",
+    "test:retry": "node --import ./scripts/alias-loader.mjs scripts/test-supabase-retry.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

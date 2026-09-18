@@ -5,9 +5,10 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { qtypeLabel, difficultyLabel } from "@/lib/question-model"
 import { indexNodes } from "@/lib/subject-nodes"
-import { loadSubjectNodes } from "@/lib/reference-data"
+import { loadSchools, loadSubjectNodes, schoolNameOf } from "@/lib/reference-data"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
+import { buildAccuracyMap, errorRatePercent, HIGH_ERROR_RATE } from "@/lib/accuracy"
 import { QuestionReader } from "@/components/bank/question-reader"
 import { PersonChip } from "@/components/bank/person-chip"
 import { AccessDenied } from "@/components/access-denied"
@@ -37,26 +38,35 @@ export default async function BankQuestionPage({ params }) {
     )
   }
 
-  const [vRes, nodes, schoolRes, tagRes, apprRes] = await Promise.all([
+  // 学校名单走缓存的参考数据（全市共 9 行、与调用者无关），不在这里单独查 ——
+  // 详情页本来就只有 1 行数据要装配，为它在并发波里多占一格连接不划算。
+  const [vRes, nodes, schools, tagRes, apprRes, accuracyRes] = await Promise.all([
     supabase
       .from("question_versions")
       .select("id, version_no, change_type, qtype, difficulty, content, published_at, created_by")
       .eq("id", q.current_published_version_id)
       .single(),
     loadSubjectNodes(),
-    supabase.from("schools").select("id, name").eq("id", q.school_id).maybeSingle(),
+    loadSchools(),
     supabase.from("version_tags").select("tag_name").eq("version_id", q.current_published_version_id),
     supabase.rpc("bank_reviewers", { p_version_ids: [q.current_published_version_id] }),
+    // 全站作答统计（按题目聚合，跨版本累计）。无人作答时该题不会出现在结果里 → accuracy 为 undefined。
+    supabase.rpc("question_accuracy", { p_question_ids: [q.id] }),
   ])
-  for (const r of [vRes, schoolRes, tagRes, apprRes]) if (r.error) throw r.error
+  for (const r of [vRes, tagRes, apprRes, accuracyRes]) if (r.error) throw r.error
+  const accuracy = buildAccuracyMap(accuracyRes.data).get(q.id)
   const v = vRes.data
   const { pathOf: nodePath } = indexNodes(nodes)
   const tags = (tagRes.data ?? []).map((t) => t.tag_name)
-  const schoolName = schoolRes.data?.name ?? ""
+  const schoolName = schoolNameOf(schools, q.school_id) ?? ""
 
   // 作者 + 两级审核通过人（决定人已注销的审批行 decided_by 已置空 → 不计入）
   const approvedBy = (apprRes.data ?? []).filter((a) => a.decided_by)
-  const peopleMap = await loadPeople(supabase, [v.created_by, ...approvedBy.map((a) => a.decided_by)])
+  const peopleMap = await loadPeople(
+    supabase,
+    [v.created_by, ...approvedBy.map((a) => a.decided_by)],
+    schools
+  )
   const author = v.created_by ? peopleMap.get(v.created_by) ?? null : null
   const reviewers = approvedBy
     .map((a) => ({ caption: a.stage === "group" ? "组长" : "专家", person: peopleMap.get(a.decided_by) }))
@@ -90,6 +100,22 @@ export default async function BankQuestionPage({ params }) {
           <Badge className="px-2 py-0.5 text-xs">{qtypeLabel(v.qtype)}</Badge>
           <span className="text-sm text-muted-foreground">难度 {difficultyLabel(v.difficulty)}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">v{v.version_no}</span>
+          {/* 全站作答错误率。无作答记录时整段不渲染 —— 详情页留白比摆一个可能是 0% 的占位干净。
+              口径是"客观题的全站累计"（question_accuracy 只统计 grading='auto'），跨版本累计。 */}
+          {accuracy && (
+            <span
+              className={
+                "text-sm " +
+                (accuracy.errorRate >= HIGH_ERROR_RATE
+                  ? "font-medium text-rose-700 dark:text-rose-400"
+                  : "text-muted-foreground")
+              }
+              title={`全站共 ${accuracy.attempts} 次作答，答对 ${accuracy.correct} 次（不含主观自评题）`}
+            >
+              错误率 {errorRatePercent(accuracy)}
+              <span className="ml-1 text-xs text-muted-foreground/70">({accuracy.attempts} 次作答)</span>
+            </span>
+          )}
           {v.change_type === "edit" && (
             <span className="text-xs text-muted-foreground">改版后的最新入库版本</span>
           )}

@@ -10,7 +10,7 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { qtypeLabel, difficultyLabel } from "@/lib/question-model"
 import { indexNodes } from "@/lib/subject-nodes"
-import { loadSubjectNodes } from "@/lib/reference-data"
+import { loadSchools, loadSubjectNodes } from "@/lib/reference-data"
 import { loadPeople } from "@/lib/people"
 import { QuestionReader } from "@/components/bank/question-reader"
 import { PrintButton } from "@/components/print-button"
@@ -55,7 +55,11 @@ export default async function PrintQuestionPage({ params }) {
   const tags = (tagRes.data ?? []).map((t) => t.tag_name)
 
   const approvedBy = (apprRes.data ?? []).filter((a) => a.decided_by)
-  const people = await loadPeople(supabase, [v.created_by, ...approvedBy.map((a) => a.decided_by)])
+  const people = await loadPeople(
+    supabase,
+    [v.created_by, ...approvedBy.map((a) => a.decided_by)],
+    await loadSchools()
+  )
   const author = v.created_by ? people.get(v.created_by) : null
   const reviewers = approvedBy
     .map((a) => `${a.stage === "group" ? "组长" : "专家"} ${people.get(a.decided_by)?.name ?? ""}`.trim())

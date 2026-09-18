@@ -6,8 +6,9 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { contentSummary, qtypeLabel, difficultyLabel } from "@/lib/question-model"
 import { indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
-import { loadSubjectNodes, loadTags } from "@/lib/reference-data"
+import { loadSchools, loadSubjectNodes, loadTags } from "@/lib/reference-data"
 import { bankQueryString, hasBankFilters, parseBankFilters } from "@/lib/bank-query"
+import { buildAccuracyMap, errorRatePercent, HIGH_ERROR_RATE } from "@/lib/accuracy"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
 import { PersonChip } from "@/components/bank/person-chip"
@@ -30,9 +31,15 @@ export default async function BankPage({ searchParams }) {
   await requireUser()
   const supabase = await createClient()
 
-  // 筛选控件/节点路径所需的共享字典。科目树与标签都是全市共享的公共词表，
+  // 筛选控件/节点路径所需的共享字典。科目树、标签、学校都是全市共享、与调用者无关的静态词表，
   // 走缓存的参考数据（lib/reference-data.js），不再每个请求各打一次往返。
-  const [nodes, tags] = await Promise.all([loadSubjectNodes(), loadTags()])
+  // 学校名单就是为了这个才加进来的：本页要为「题源」显示校名，原先按本页涉及到的学校单独查一次
+  // —— 那是每次 /bank 渲染的 4 个并发查询之一，而全校只有 9 行、还是恒定不变的。
+  const [nodes, tags, schools] = await Promise.all([
+    loadSubjectNodes(),
+    loadTags(),
+    loadSchools(),
+  ])
   const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
 
   // 科目筛选 = 所选节点及其全部后代（题库挂在学科/课程这类可挂节点上）
@@ -73,23 +80,31 @@ export default async function BankPage({ searchParams }) {
     count = res.count ?? 0
   }
 
-  // 行装配所需的字典：学校 / 该页版本的标签 / 当前版本的两级审核通过记录
+  // 行装配所需的字典：该页版本的标签 / 当前版本的两级审核通过记录 / 全站正确率。
+  // 学校名单不在其中 —— 它走上一步的缓存（见上）。
   const versionIds = versionRows.map((v) => v.id)
-  const schoolIds = [...new Set(versionRows.map((v) => v.question?.school_id).filter(Boolean))]
   const creatorIds = [...new Set(versionRows.map((v) => v.created_by).filter(Boolean))]
+  // question_accuracy 按 question_id 聚合（不按 version_id），所以这里要的是题目 id。
+  // 每页 10 条，远在该 RPC 的 200 id 上限内。
+  const questionIds = [...new Set(versionRows.map((v) => v.question?.id).filter(Boolean))]
   const empty = Promise.resolve({ data: [] })
-  const [schoolRes, rowTagRes, apprRes] = await Promise.all([
-    schoolIds.length ? supabase.from("schools").select("id, name").in("id", schoolIds) : empty,
+  const [rowTagRes, apprRes, accuracyRes] = await Promise.all([
     versionIds.length
       ? supabase.from("version_tags").select("version_id, tag_name").in("version_id", versionIds)
       : empty,
     versionIds.length ? supabase.rpc("bank_reviewers", { p_version_ids: versionIds }) : empty,
+    questionIds.length
+      ? supabase.rpc("question_accuracy", { p_question_ids: questionIds })
+      : empty,
   ])
-  const schoolMap = new Map((schoolRes.data ?? []).map((s) => [s.id, s.name]))
+  const schoolMap = new Map(schools.map((s) => [s.id, s.name]))
+  const accuracyMap = buildAccuracyMap(accuracyRes.data)
 
-  // 人物资料快照（作者 + 两级审核通过人）：列表 chips 与点击浮层共用
+  // 人物资料快照（作者 + 两级审核通过人）：列表 chips 与点击浮层共用。
+  // 学校名单已经有了一份（上面缓存的），传进去让 loadPeople 少打一次 —— 它每次都要为
+  // 同样那 9 行查一遍，而这一层是 /bank 渲染的第二波并发查询之一。
   const approverUids = [...new Set((apprRes.data ?? []).map((a) => a.decided_by).filter(Boolean))]
-  const peopleMap = await loadPeople(supabase, [...creatorIds, ...approverUids])
+  const peopleMap = await loadPeople(supabase, [...creatorIds, ...approverUids], schools)
 
   const approversByVersion = new Map()
   for (const a of apprRes.data ?? []) {
@@ -131,6 +146,8 @@ export default async function BankPage({ searchParams }) {
       chips,
       subs,
       tags: tagsByVersion.get(v.id) ?? [],
+      // 无作答记录 → undefined（题目存在但还没人练过），渲染端据此显示"暂无作答数据"
+      accuracy: accuracyMap.get(q.id),
     }
   })
 
@@ -203,6 +220,21 @@ export default async function BankPage({ searchParams }) {
                   {r.qtypeLabel}
                 </Badge>
                 <span>难度 {r.difficultyLabel}</span>
+                {/* 错误率来自全站作答记录；没人做过时明确说"没有数据"，不能显示成 0%（会被读成"大家都做对了"） */}
+                {r.accuracy ? (
+                  <Badge
+                    variant="secondary"
+                    className={
+                      "px-1.5 py-0 text-xs" +
+                      (r.accuracy.errorRate >= HIGH_ERROR_RATE ? " bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" : "")
+                    }
+                    title={`全站共 ${r.accuracy.attempts} 次作答，答对 ${r.accuracy.correct} 次`}
+                  >
+                    错误率 {errorRatePercent(r.accuracy)}
+                  </Badge>
+                ) : (
+                  <span className="text-muted-foreground/70">暂无作答数据</span>
+                )}
                 {r.subs > 0 && <span>含 {r.subs} 道子题</span>}
                 <span className="text-muted-foreground/60">v{r.versionNo}</span>
                 <span className="ml-auto inline-flex items-center gap-1">

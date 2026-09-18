@@ -20,16 +20,20 @@ import { DeepSeekSettingsPanel } from "@/components/import/deepseek-settings-pan
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon } from "lucide-react"
 
-// 解析节奏：两个档位，默认「稳妥」。
-// 为什么默认单页串行：并发写库是数据库锁等待的直接来源（`log_lock_waits=on` 时每次等待
-// 都会把完整 SQL 写进 Postgres 日志，一条几十 KB），在小规格实例上足以把盘写满、
-// 进而拖垮整个 API（我们踩过一次）。单页串行把并发写库降到 0，代价是慢约 3 倍。
-// 平台那三项（清日志 / 开轮转 / 关锁等待记录）修好之后，可以按需切回「快速」。
-const PACES = {
-  safe: { lanes: 1, perClaim: 1, label: "稳妥（单页串行）", hint: "一次一页，数据库零并发写入，最不容易把实例拖垮" },
-  fast: { lanes: 3, perClaim: 2, label: "快速（3 路并发）", hint: "快约 3 倍，但同时有 3 条并发写库" },
-}
-const PACE_KEY = "mianyang.import.pace"
+// 解析节奏：**只有一条车道**，不再提供"多车道并发"档位。
+//
+// 为什么删掉多车道：车道数 = 同时进行的 import_save_page 调用数，而这些调用写的是**同一个 job**
+// —— 每存一页 import_refresh_job 都要 update import_jobs 的同一行、并把该任务的页/题全量重算一遍，
+// 所以它们天生互相排队。排队一旦超过 deadlock_timeout（1s），log_lock_waits=on 就会把
+// **整条 SQL 原文**写进 Postgres 日志（那条 INSERT ... from jsonb_array_elements 很长）。
+// 小规格实例的盘被这些日志写满之后，PostgREST 拿不到连接，站点开始成片报 connection pool timeout。
+// 换句话说"快 3 倍"的代价不是多花点 CPU，而是把整个实例拖垮 —— 这不是一个该摆给使用者的选项。
+//
+// 那速度从哪来？**把并发放在模型调用上，而不是放在写库上。**
+// parseAndSavePages 内部本来就是「本批各页并发调 DeepSeek（纯网络，不碰库）→ 再逐页串行写库」，
+// 所以只要把「一次认领几页」调大，就同时得到：并发的模型调用 + 唯一的写库通道。
+// 模型等待是这条流水线的大头（本地渲染之外就是它），并行掉它就够了。
+const PER_CLAIM = 3
 
 // ---------- 单标签页运行锁 ----------
 // 为什么需要：两个标签页同时跑同一个任务时，库里的租约会让其中一方**解析完却存不进去**
@@ -80,24 +84,6 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
 
   // 密钥在 localStorage 里，SSR 读不到：用 hook 在挂载后读，避免 hydration 不一致
   const { hasKey, ready: keyReady, refresh: refreshKey } = useDeepSeekPrefs()
-  // 解析节奏同样存在本机；默认稳妥，挂载后再读（避免 hydration 不一致）
-  const [pace, setPace] = useState("safe")
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(PACE_KEY)
-      if (v && PACES[v]) setPace(v)
-    } catch {
-      // 读不到就用默认值
-    }
-  }, [])
-  function pickPace(v) {
-    setPace(v)
-    try {
-      localStorage.setItem(PACE_KEY, v)
-    } catch {
-      // 存不进去也不影响本次使用
-    }
-  }
   const hasFile = Boolean(fileRef.current)
   const remaining = pages.filter(
     (p) => p.attempts < 3 && (p.status === "pending" || p.status === "running")
@@ -124,7 +110,8 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
       setLaneState((s) => ({ ...s, [laneId]: "认领中" }))
       const { data: claimed, error: claimErr } = await supabase.rpc("import_claim_pages", {
         p_job_id: job.id,
-        p_limit: PACES[pace].perClaim,
+        // 一次认领一批 = 本批的模型并发度；写库仍是一条串行通道（见文件头 PER_CLAIM 的说明）
+        p_limit: PER_CLAIM,
         p_lease_seconds: 300,
       })
       if (claimErr) {
@@ -233,7 +220,8 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
     // 心跳：让其他标签页知道这里在跑（15 秒没心跳就视为已停止）
     const beat = setInterval(() => acquireRunLock(job.id), 5000)
     try {
-      await Promise.all(Array.from({ length: PACES[pace].lanes }, (_, i) => runLane(i)))
+      // 单车道：并发已经在 runLane 内部（一批多页并发调模型），这里再并发就会变成并发写库
+      await runLane(0)
     } finally {
       clearInterval(beat)
       releaseRunLock(job.id)
@@ -291,22 +279,6 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           <RotateCcwIcon className="size-4" />
           重试失败页
         </Button>
-        <span className="flex items-center gap-1 text-xs text-muted-foreground" title={PACES[pace].hint}>
-          解析节奏
-          {Object.entries(PACES).map(([key, cfg]) => (
-            <button
-              key={key}
-              type="button"
-              disabled={running}
-              onClick={() => pickPace(key)}
-              className={`rounded-full px-2 py-0.5 ${
-                pace === key ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/60"
-              } ${running ? "cursor-not-allowed opacity-60" : ""}`}
-            >
-              {cfg.label}
-            </button>
-          ))}
-        </span>
         <span className="text-xs text-muted-foreground">
           已完成 {job.done_pages}/{job.total_pages} 页 · 失败 {job.failed_pages} · 抽到题 {job.item_count}
           {running && ` · ${Object.values(laneState).join(" / ")}`}

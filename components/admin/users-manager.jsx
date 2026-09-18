@@ -59,6 +59,7 @@ import { fmtDateTime24 } from "@/lib/format"
 import {
   Building2Icon,
   CrownIcon,
+  GraduationCapIcon,
   IdCardIcon,
   Loader2Icon,
   MoreHorizontalIcon,
@@ -73,16 +74,26 @@ import {
 
 const SCHOOL_ADMIN_ROLE = "school_admin"
 const schoolOf = (map, id) => (id ? (map.get(id)?.name ?? null) : null)
-// 学生只能"查看资料"：审核岗位与学校管理员都面向教师（服务端 0059 同样拦截）
-const isStudentUser = (u) => u.identity === "student"
+// 本页**不含学生**：identity='student' 归「学生名册」（/students），由 lib/admin-users.js 的
+// neq("identity","student") 保证。所以这里不再有 isStudent 分支 —— 别再加回来，
+// 那会把两边的口径重新搅在一起（学生转教师后自动换边，两边互补且互斥）。
 const identityLabel = (u) =>
-  u.identity === "student" ? "学生" : u.identity === "teacher_pending" ? "教师（待审核）" : "教师"
+  u.identity === "teacher_pending" ? "教师（待审核）" : "教师"
 // 资料弹窗里的一句话说明：三态身份的差别就在"能不能出题/被任命"
 const PROFILE_HINTS = {
   student: "学生账号：只参与练习与考试，不参与出题、审核与任命。",
   teacher_pending: "教师账号（待审核）：通过教师身份审核后才能出题。",
   teacher: "教师账号：可出题、组卷，并可被任命为教研组长 / 市级专家。",
 }
+
+// 任教专业决定该教师能在「学生名册」里看到哪些学生（见 0063 的 can_view_student）。
+// 只有教师需要它 —— 管理员不靠专业限定范围。
+const canSetMajor = (u, caller) =>
+  !u.is_admin &&
+  u.identity !== "student" &&
+  Boolean(u.school_id) &&
+  (caller.isAdmin ||
+    (caller.isSchoolAdmin && u.school_id === caller.schoolId))
 
 export function UsersManager({
   users: initialUsers,
@@ -186,16 +197,15 @@ export function UsersManager({
                 caller={caller}
                 onRpc={runRpc}
                 canBindSchool={caller.isAdmin}
-                // 学生不参与审核与管理：三项任命一律不显示（他只会看到「查看资料」）
-                canToggleSA={caller.isAdmin && !u.is_admin && !isStudentUser(u)}
+                canToggleSA={caller.isAdmin && !u.is_admin}
                 canAssignLeader={
                   !u.is_admin &&
-                  !isStudentUser(u) &&
                   Boolean(u.school_id) &&
                   caller.isSchoolAdmin &&
                   u.school_id === caller.schoolId
                 }
-                canAssignExpert={caller.isAdmin && !u.is_admin && !isStudentUser(u)}
+                canAssignExpert={caller.isAdmin && !u.is_admin}
+                canSetMajor={canSetMajor(u, caller)}
               />
             ))}
           </TableBody>
@@ -217,6 +227,7 @@ function UserRow({
   canToggleSA,
   canAssignLeader,
   canAssignExpert,
+  canSetMajor,
 }) {
   const [bindOpen, setBindOpen] = useState(false)
   const [bindSchool, setBindSchool] = useState("")
@@ -224,6 +235,7 @@ function UserRow({
   const [saConfirm, setSaConfirm] = useState(false)
   const [saBusy, setSaBusy] = useState(false)
   const [picker, setPicker] = useState(null) // { role: 'group_leader' | 'city_expert' } 或 null
+  const [majorOpen, setMajorOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [revokeId, setRevokeId] = useState(null)
   const [revokeBusy, setRevokeBusy] = useState(false)
@@ -231,7 +243,6 @@ function UserRow({
   const [delBusy, setDelBusy] = useState(false)
   const [busyAction, setBusyAction] = useState("")
 
-  const isStudent = isStudentUser(u)
   const isSchoolAdminNow = schoolAdmins.has(u.user_id)
   const activeSchools = [...schoolMap.values()].filter((s) => s.is_active)
   const initial = (u.name || "?").slice(0, 1)
@@ -281,6 +292,17 @@ function UserRow({
   }
 
   async function handleNodePick(node) {
+    if (majorOpen) {
+      setBusyAction("major")
+      const ok = await onRpc(
+        "admin_set_teacher_major",
+        { p_user_id: u.user_id, p_major_node_id: node.id },
+        "任教专业已设置"
+      )
+      setBusyAction("")
+      if (ok) setMajorOpen(false)
+      return
+    }
     if (!picker) return
     setBusyAction("assign")
     const fn =
@@ -305,7 +327,13 @@ function UserRow({
           !hasActiveCityExpert))
   )
   const canAny =
-    canBindSchool || canToggleSA || canAssignLeader || canAssignExpert || revocable.length > 0 || canDelete
+    canBindSchool ||
+    canToggleSA ||
+    canAssignLeader ||
+    canAssignExpert ||
+    canSetMajor ||
+    revocable.length > 0 ||
+    canDelete
 
   return (
     <>
@@ -348,14 +376,18 @@ function UserRow({
                 </Badge>
               )
             })}
-            {u.identity === "student" && <Badge variant="outline">学生</Badge>}
             {u.identity === "teacher_pending" && (
               <Badge className="bg-amber-100 text-amber-700">教师（待审核）</Badge>
+            )}
+            {/* 任教专业：没设置就不显示 —— 用「未设置」占满列宽只会淹没真正有信息的行 */}
+            {u.major_node_id && (
+              <Badge variant="outline" className="max-w-full" title={pathOf(u.major_node_id)}>
+                <span className="truncate">专业 · {pathOf(u.major_node_id) || "?"}</span>
+              </Badge>
             )}
             {!u.is_admin &&
               !isSchoolAdminNow &&
               assignments.length === 0 &&
-              u.identity !== "student" &&
               u.identity !== "teacher_pending" && (
                 <span className="text-xs text-muted-foreground">教师</span>
               )}
@@ -363,12 +395,6 @@ function UserRow({
         </TableCell>
         <TableCell className="text-right">
           <div className="flex items-center justify-end gap-1">
-            {/* 学生的主操作就是看资料：任命类入口对他没有意义（服务端 0059 也拦） */}
-            {isStudent && (
-              <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>
-                <IdCardIcon className="size-3.5" /> 查看资料
-              </Button>
-            )}
             {!menuBlocked && canAny && (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -384,9 +410,12 @@ function UserRow({
                     <DropdownMenuLabel>{u.name} · 操作</DropdownMenuLabel>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
-                  {!isStudent && (
-                    <DropdownMenuItem onClick={() => setProfileOpen(true)}>
-                      <IdCardIcon /> 查看资料
+                  <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                    <IdCardIcon /> 查看资料
+                  </DropdownMenuItem>
+                  {canSetMajor && (
+                    <DropdownMenuItem onClick={() => setMajorOpen(true)}>
+                      <GraduationCapIcon /> 设置任教专业…
                     </DropdownMenuItem>
                   )}
                   {canBindSchool && (
@@ -612,6 +641,18 @@ function UserRow({
             ? `将任命「${u.name}」为 ${schoolOf(schoolMap, u.school_id) ?? ""} 的教研组长：覆盖所选节点及其后代科目的题目审核（最深处任命优先）。`
             : `将任命「${u.name}」为市级专家：审核所选节点及其后代科目的题目（最深处任命优先）。`
         }
+        onSelect={handleNodePick}
+      />
+
+      {/* 任教专业选择。选专业大类 = 管该大类下全部专业的学生；选专业 = 只管该专业。 */}
+      <TreePicker
+        open={majorOpen}
+        onOpenChange={(v) => !v && !busyAction && setMajorOpen(false)}
+        nodes={nodes}
+        title="设置任教专业"
+        hint={`决定「${u.name}」在学生名册里能看到哪些学生。选专业大类则覆盖其下全部专业；留空（不设置）则看不到任何学生。`}
+        pickable={(n) => n.scope === "vocational" && (n.kind === "category" || n.kind === "major")}
+        blockedLabel="（不可选）"
         onSelect={handleNodePick}
       />
     </>

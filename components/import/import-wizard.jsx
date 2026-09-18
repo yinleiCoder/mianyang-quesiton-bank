@@ -12,7 +12,6 @@ import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { SOURCE_KINDS, jobStateChip } from "@/lib/import-jobs"
-import { docxWindow } from "@/lib/docx-client"
 import { trialParse } from "@/lib/import-parse-client"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { Button } from "@/components/ui/button"
@@ -90,20 +89,25 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
         setTitle(name.replace(/\.pdf$/i, ""))
         fileRef.current = { kind: "pdf", name, handle: pdf, files: [first] }
       } else if (/\.docx$/i.test(name)) {
-        const { extractDocx } = await import("@/lib/docx-client")
+        const { extractDocx, docxBatches } = await import("@/lib/docx-client")
         const doc = await extractDocx(first)
         if (doc.charCount === 0) throw new Error("Word 文档里没有可提取的文字（可能是扫描件导出的图片）")
+        // Word 没有"页"，这里按**题**切块再打包成批：一批 = 一次模型调用。
+        // 早前是"每段开一个重叠窗口"，200 段的卷子要调 200 次模型（50 分钟以上），
+        // 现在同样的卷子约 12 批 —— 见 lib/docx-client.js 顶部的说明。
+        const batches = docxBatches(doc.paragraphs)
         setPicked({
           kind: "docx",
           name,
-          pages: doc.paragraphs.length,
+          pages: batches.length,
           sizeMB: Math.round(first.size / 1048576),
           doc,
+          paragraphs: doc.paragraphs.length,
         })
         setFrom(1)
-        setTo(doc.paragraphs.length)
+        setTo(batches.length)
         setTitle(name.replace(/\.docx$/i, ""))
-        fileRef.current = { kind: "docx", name, doc, files: [first] }
+        fileRef.current = { kind: "docx", name, doc, batches, files: [first] }
       } else if (list.every((f) => /^image\//.test(f.type))) {
         setPicked({
           kind: "image",
@@ -238,20 +242,23 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
           {picked && (
             <span className="text-sm text-muted-foreground">
               {picked.name} · {SOURCE_KINDS[picked.kind]} · {picked.sizeMB}MB ·{" "}
-              {picked.kind === "docx" ? `${picked.pages} 个段落` : `${picked.pages} 页`}
+              {picked.kind === "docx"
+                ? `${picked.paragraphs} 段 → ${picked.pages} 批`
+                : `${picked.pages} 页`}
             </span>
           )}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           文件<b>不会上传</b>，只在你的浏览器里读取——所以几百兆的卷子也能导入。关闭页面后需要重新选择同一个文件才能继续。
-          {picked?.kind === "docx" && " Word 文档没有「页」的概念（页码是排版结果），所以下面按段落范围选择。"}
+          {picked?.kind === "docx" &&
+            " Word 文档没有「页」的概念（页码是排版结果），所以先按题切成批——一批是若干道完整的题，一次解析一批。"}
         </p>
       </div>
 
       {picked && (
         <div className="rounded-xl border p-4">
           <Label className="mb-2 block">
-            2. 导入范围{picked.kind === "docx" ? "（段落）" : "（页）"}
+            2. 导入范围{picked.kind === "docx" ? "（批）" : "（页）"}
           </Label>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -272,7 +279,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
               className="w-24"
             />
             <span className="text-sm text-muted-foreground">
-              共 {to - from + 1} {picked.kind === "docx" ? "段" : "页"}
+              共 {to - from + 1} {picked.kind === "docx" ? "批" : "页"}
             </span>
             {picked.kind === "pdf" && (
               <Button variant="outline" size="sm" onClick={handleProbe} disabled={!!busy}>
@@ -490,17 +497,16 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
     return { page_no: pageNo, mode: "vision", images: [{ data_url: img.dataUrl, w: 0, h: 0 }], detail }
   }
   if (file.kind === "docx") {
-    // Word 没有页：这里把若干段落拼成一批，range 的"页"即段落序号。
-    // 窗口边界要按内容对齐——固定切 5 段会把"题干在窗口内、选项在窗口外"的题切出来，
-    // 那种题在入库时必然被判为缺选项（见 lib/docx-client.js 的 docxWindow）
-    const win = docxWindow(file.doc.paragraphs, pageNo)
+    // Word 没有页：这里的"第 pageNo 批"是切好的题块分组（见 lib/docx-client.js 的 docxBatches）。
+    // 每批都是**完整题块的并集**，所以不会出现"题干在这批、选项在下批"的残缺题；
+    // 批与批之间也不重叠，于是同一道题不会被重复解析。
+    const batch = file.batches?.[pageNo - 1]
+    if (!batch) throw new Error(`第 ${pageNo} 批不存在（这份文档只有 ${file.batches?.length ?? 0} 批）`)
     return {
       page_no: pageNo,
       mode: "text",
-      text: win.text,
-      note: win.extendedForward > 0 || win.extendedBackward > 0
-        ? `本批为 Word 段落（为对齐题目边界，向${win.extendedBackward > 0 ? "前 " + win.extendedBackward + " 段" : ""}${win.extendedBackward > 0 && win.extendedForward > 0 ? "、" : ""}${win.extendedForward > 0 ? "后 " + win.extendedForward + " 段" : ""}扩了窗口）`
-        : "本批为 Word 段落",
+      text: batch.text,
+      note: `本批为 Word 原文第 ${batch.start + 1}~${batch.end} 段，含 ${batch.questions} 道题`,
     }
   }
   if (!file.handle) throw new Error("PDF 句柄已失效，请重新选择文件")
