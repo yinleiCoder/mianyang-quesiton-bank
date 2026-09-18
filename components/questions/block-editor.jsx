@@ -3,7 +3,9 @@
 // 内容块编辑器：文本段落块（textarea 逐段）+ 媒体块（经 OSS 直传插入；已存在媒体只读展示、可删除）。
 // 双向契约：值即内容块数组 [{t:'text'|'media',...}]，直接落入 DB content（无中间格式，历史版本块永不改写）。
 // 媒体块只存相对 key（服务端生成，qbank/…），展示时拼 CNAME 公网域名（见 lib/oss-url）。
-// 类型策略：题干/材料/解析可插图、音视频与文件附件（mediaLabel）；选项等纯文字场景传 noMedia，不提供媒体入口。
+// 类型策略：题干/材料/解析/选项都可插图、音视频与文件附件（mediaLabel）。
+// noMedia 仍然保留给**真正纯文字**的场景（如填空题的空的说明文案），但选项已不再属于这类：
+// 选项的 label 本来就是块数组，两端也都能渲染图片块，编辑器原先拦着只是历史遗留。
 import { useState } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"

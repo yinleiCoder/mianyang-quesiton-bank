@@ -99,7 +99,11 @@ function TypePanel({ qtype, part, onChange }) {
                   placeholder={`选项内容${on ? "（当前标记为答案）" : ""}`}
                   minRows={1}
                   compact
-                  noMedia // 选项纯文字：不提供插图/音视频/文件入口（题干/解析处可插媒体）
+                  // 选项**开放媒体入口**：选项的 label 本来就是块数组
+                  // （线格式 `[{"key":"A","label":[block]}]`，见 mianyang_quiz 的
+                  //  question_content.dart），两端也都能渲染图片块，原先的 noMedia
+                  // 只是编辑器这一层的限制。职校题里"看图选图"很常见（零件图、电路图）。
+                  // 判分不受影响：答案比的是选项 key，不是 label 内容。
                 />
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
