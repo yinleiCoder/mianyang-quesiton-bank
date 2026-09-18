@@ -7,11 +7,22 @@
 -- 手机号的**真相源是 `auth.users.phone`**（Supabase 原生列，E.164 格式 `+8613800138000`）；
 -- `profiles.phone` 只是镜像，供列表/审计展示 —— 与 `profiles.email` 的定位完全一致。
 --
--- 免短信的前提：Supabase 面板 Authentication → Providers → Phone 里
--- **关闭 "Confirm phone"**（配置项 `phone_autoconfirm = true`）。关掉之后
--- `signUp({ phone, password })` 不再发短信，也就不需要短信服务商。
--- 代价要如实说：手机号不做归属校验（谁都能拿别人号码注册），且**忘记密码没有自助通道**，
--- 只能由管理员重置 —— 学生忘密码比忘邮箱常见得多，这是本方案最大的运维负担。
+-- **为什么不用 Supabase 原生的 phone 认证**：启用 Phone provider 必须先配短信服务商
+-- （Twilio / MessageBird / Vonage / TextLocal），而发往国内 +86 的短信要么到不了、
+-- 要么需要企业资质与签名模板审批。本项目没有短信服务商，也不打算为此投入。
+--
+-- **实际方案：合成邮箱。** 手机号在这里的唯一作用是「一个好记的账号名」，本质是个标识符，
+-- 不必占用 auth.users.phone 这一列（那一列的语义是"经短信验证过的号码"）。
+-- 学生输入 `13800138000`，前端换算成 `13800138000@phone.myquiz.cn` 去 signUp/signIn。
+-- 该域名由本项目自有、永不作收信用途，且邮箱确认本来就是关的（mailer_autoconfirm=true）。
+--
+-- 代价要如实说：
+--   1. 手机号不做归属校验（谁都能拿别人号码注册）；
+--   2. **忘记密码没有自助通道**，只能由管理员重置 —— 学生忘密码比忘邮箱常见得多；
+--   3. 一个账号只能有一个标识符（邮箱字段只有一个），所以老用户无法"同时"用邮箱和手机号登录。
+--
+-- `auth.users.phone` 与下面的同步触发器仍保留：将来若真接了短信，把手机号写进
+-- 原生 phone 列即可无缝切换，profile 侧不用动。
 
 -- ---------------------------------------------------------------------------
 -- 1) profiles 加 phone 列
@@ -48,7 +59,11 @@ declare
     nullif(new.phone, ''),
     nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
     '用户');
-  v_phone text := nullif(new.phone, '');
+  -- 手机号有两个来源：原生 phone 列（将来真接短信时），或注册时随 options.data 带上来的
+  -- 元数据（当前"合成邮箱"方案走的就是这条 —— 此时 auth.users.phone 是 NULL）。
+  v_phone text := coalesce(
+    nullif(new.phone, ''),
+    nullif(trim(coalesce(new.raw_user_meta_data ->> 'phone', '')), ''));
   v_school uuid := nullif(new.raw_user_meta_data ->> 'school_id', '')::uuid;
   v_identity text := case
     when new.raw_user_meta_data ->> 'identity' = 'teacher' then 'teacher_pending'

@@ -9,6 +9,7 @@ import { indexNodes, nodePathOf } from "@/lib/subject-nodes"
 import { qtypeLabel } from "@/lib/question-model"
 import { fmtDate, fmtDateTime24 } from "@/lib/format"
 import { avatarUrl } from "@/lib/oss-url"
+import { displayEmail, formatPhone } from "@/lib/phone"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -60,9 +61,13 @@ export function StudentDetail({ detail, nodes }) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2">
               <span className="text-base font-medium">{s.name || "（未填姓名）"}</span>
-              <span className="text-sm text-muted-foreground">{s.email}</span>
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+              {/* 手机号与邮箱**分两项**，各自独立 —— 学生大多只有手机号、没有邮箱。
+                  邮箱走 displayEmail 折叠：手机号账号的 email 是合成地址
+                  （138…@phone.myquiz.cn），直接印出来会让人以为学生有个怪邮箱。 */}
+              <Info label="手机号" value={s.phone ? formatPhone(s.phone) : "未绑定"} />
+              <Info label="邮箱" value={displayEmail(s.email) || "未绑定"} />
               <Info label="班级" value={s.class_name ?? "未分班"} warn={!s.class_id} />
               <Info label="入学年份" value={gradeLabel(s.enroll_year)} />
               <Info label="专业大类" value={s.major_category} />

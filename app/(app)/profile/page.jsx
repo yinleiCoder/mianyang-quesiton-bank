@@ -30,6 +30,9 @@ export default async function ProfilePage() {
       <ProfileEditor
         userId={ctx.user.id}
         email={ctx.user.email}
+        // 手机号从 profiles 来（auth.users.phone 在"合成邮箱"方案下恒为 NULL）。
+        // 资料页把手机号与邮箱分两行展示 —— 它们是两个独立字段，不是二选一。
+        phone={profile?.phone ?? null}
         roles={ownRoleLabels(ctx)}
         initial={{
           name: profile?.name ?? "",

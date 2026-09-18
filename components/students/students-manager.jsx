@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client"
 import { accuracyPercent, gradeLabel, studentQueryString } from "@/lib/students"
 import { fmtDateTime24 } from "@/lib/format"
 import { avatarUrl } from "@/lib/oss-url"
+import { displayIdentifier } from "@/lib/phone"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -259,7 +260,9 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
                         </Avatar>
                         <div className="min-w-0">
                           <div className="truncate font-medium">{r.name || "（未填姓名）"}</div>
-                          <div className="truncate text-xs text-muted-foreground">{r.email}</div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {displayIdentifier({ phone: r.phone, email: r.email })}
+                          </div>
                         </div>
                       </div>
                     </TableCell>

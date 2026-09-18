@@ -55,6 +55,7 @@ import { TreePicker } from "@/components/admin/tree-picker"
 import { indexNodes } from "@/lib/subject-nodes"
 import { loadAdminUserDirectory } from "@/lib/admin-users"
 import { avatarUrl } from "@/lib/oss-url"
+import { displayEmail, displayIdentifier, formatPhone } from "@/lib/phone"
 import { fmtDateTime24 } from "@/lib/format"
 import {
   Building2Icon,
@@ -121,7 +122,11 @@ export function UsersManager({
     const s = q.trim().toLowerCase()
     if (!s) return users
     return users.filter(
-      (u) => u.name?.toLowerCase().includes(s) || u.email?.toLowerCase().includes(s)
+      (u) =>
+        u.name?.toLowerCase().includes(s) ||
+        u.email?.toLowerCase().includes(s) ||
+        // 手机号也得能搜到 —— 学生大多只有手机号，管理员拿到的名单往往就是号码
+        u.phone?.toLowerCase().includes(s)
     )
   }, [users, q])
 
@@ -350,7 +355,14 @@ function UserRow({
                 {u.name}
                 {u.is_admin && <CrownIcon className="size-3.5 text-amber-500" />}
               </p>
-              <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+              {/* 列表行紧凑，只出一行标识：有手机号显示手机号，否则邮箱。
+                  走 displayIdentifier 而不是直接印 email —— 手机号账号的 email
+                  是合成地址（138…@phone.myquiz.cn，见 lib/phone.js）。 */}
+              {displayIdentifier({ phone: u.phone, email: u.email }) && (
+                <p className="truncate text-xs text-muted-foreground">
+                  {displayIdentifier({ phone: u.phone, email: u.email })}
+                </p>
+              )}
             </div>
           </div>
         </TableCell>
@@ -492,11 +504,20 @@ function UserRow({
             </Avatar>
             <div className="min-w-0">
               <p className="truncate font-medium">{u.name}</p>
-              <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+              {displayIdentifier({ phone: u.phone, email: u.email }) && (
+                <p className="truncate text-xs text-muted-foreground">
+                  {displayIdentifier({ phone: u.phone, email: u.email })}
+                </p>
+              )}
             </div>
           </div>
           <dl className="grid gap-2 text-sm">
             {[
+              // 手机号与邮箱**分两行**——它们是两个独立字段，不是二选一。
+              // 学生大多只有手机号，邮箱留空即可。邮箱走 displayEmail 折叠掉合成地址
+              // （138…@phone.myquiz.cn，见 lib/phone.js），别让学生"看起来有个怪邮箱"。
+              ["手机号", u.phone ? formatPhone(u.phone) : "未绑定"],
+              ["邮箱", displayEmail(u.email) || "未绑定"],
               ["学校", schoolOf(schoolMap, u.school_id) ?? "未绑定"],
               ["身份", identityLabel(u)],
               ["注册时间", u.created_at ? fmtDateTime24(u.created_at) : "—"],

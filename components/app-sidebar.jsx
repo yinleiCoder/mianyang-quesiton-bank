@@ -21,6 +21,7 @@ import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { avatarUrl } from "@/lib/oss-url";
+import { displayIdentifier } from "@/lib/phone";
 import { ownRoleLabels } from "@/lib/roles";
 import {
   DropdownMenu,
@@ -195,7 +196,9 @@ export function AppSidebar({
     .filter(Boolean)
     .join(" / ");
 
-  const displayName = user.name || user.email.split("@")[0] || "用户";
+  // 姓名兜底：手机号账号没有邮箱，退到 email 的本地部分会拿到一段数字（合成地址的
+  // `13800138000`），虽然能用但语义是错的 —— 所以先试手机号。
+  const displayName = user.name || user.phone || user.email.split("@")[0] || "用户";
   const initial = displayName.trim().slice(0, 1) || "?";
 
   return (
@@ -301,7 +304,7 @@ export function AppSidebar({
                           {displayName}
                         </span>
                         <span className="truncate text-xs text-muted-foreground">
-                          {user.email}
+                          {displayIdentifier({ phone: user.phone, email: user.email })}
                         </span>
                       </div>
                     </div>

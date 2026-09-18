@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Loader2Icon, ShieldCheckIcon } from "lucide-react"
+import { displayIdentifier } from "@/lib/phone"
 
 export function TeacherReviewQueue({ pendingUsers = [] }) {
   const router = useRouter()
@@ -51,7 +52,9 @@ export function TeacherReviewQueue({ pendingUsers = [] }) {
             className="flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2"
           >
             <span className="text-sm font-medium">{u.name}</span>
-            <span className="text-xs text-muted-foreground">{u.email}</span>
+            <span className="text-xs text-muted-foreground">
+              {displayIdentifier({ phone: u.phone, email: u.email })}
+            </span>
             {u.schoolName ? (
               <Badge variant="outline">{u.schoolName}</Badge>
             ) : (

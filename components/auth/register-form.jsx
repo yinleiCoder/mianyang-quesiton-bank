@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { translateAuthError } from "@/lib/auth-errors"
+import { toAuthIdentifier, normalizePhone, formatPhone } from "@/lib/phone"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2Icon, MailCheckIcon } from "lucide-react"
+import { Loader2Icon, CircleCheckIcon } from "lucide-react"
 
 export function RegisterForm({ schools, classes = [] }) {
   const router = useRouter()
@@ -23,12 +24,14 @@ export function RegisterForm({ schools, classes = [] }) {
   const [schoolId, setSchoolId] = useState("")
   const [identity, setIdentity] = useState("student")
   const [classId, setClassId] = useState("")
-  const [email, setEmail] = useState("")
+  // 账号标识：学生填手机号，教师手机号或邮箱都行。换算规则见 lib/phone.js
+  const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [error, setError] = useState(null)
   const [pending, startTransition] = useTransition()
-  const [done, setDone] = useState(false) // 已提交（等待邮箱验证）
+  const [done, setDone] = useState(false) // 已提交，等待跳转
+  const [doneLabel, setDoneLabel] = useState("") // 提交后回显的账号（手机号或邮箱）
 
   // 班级按所选学校筛。学生端**只选班级**：专业大类与专业由班级带出（服务端 handle_new_user），
   // 不再让学生手输 —— 线上曾经出现过同一个班被写成八种名字的情况，就是这么来的。
@@ -48,10 +51,24 @@ export function RegisterForm({ schools, classes = [] }) {
       setError("两次输入的密码不一致")
       return
     }
+
+    // 学生必须用手机号：他们大多没有邮箱、也记不住邮箱，用邮箱注册等于给自己埋一个
+    // 「找不回账号」的坑（何况现在是免短信、连密码都只能找管理员重置）。
+    // 教师两头都行 —— 不少老师的邮箱是学校统一发的，强制改手机号反而添乱。
+    const { email, phone } = toAuthIdentifier(identifier)
+    if (!email || (identity === "student" && !phone)) {
+      setError(
+        identity === "student" ? "学生请填写 11 位手机号作为账号" : "请填写正确的手机号或邮箱"
+      )
+      return
+    }
+
     startTransition(async () => {
       const supabase = createClient()
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
+        // 手机号账号在这里存成合成邮箱（换算与理由见 lib/phone.js）。
+        // phone 同时随元数据下发，供 handle_new_user 落进 profiles.phone（0064）。
+        email,
         password,
         options: {
           // identity=teacher → 服务端置「教师待审核」，经学校管理员审核后获得出题等教师权限（0025）。
@@ -63,6 +80,7 @@ export function RegisterForm({ schools, classes = [] }) {
             school_id: schoolId || null,
             identity,
             class_id: identity === "student" ? classId || null : null,
+            phone: phone || null,
           },
           // 验证邮件里的链接默认回登录页
           emailRedirectTo: `${window.location.origin}/login`,
@@ -77,6 +95,7 @@ export function RegisterForm({ schools, classes = [] }) {
         router.push("/dashboard")
         router.refresh()
       } else {
+        setDoneLabel(phone ? formatPhone(phone) : email)
         setDone(true)
       }
     })
@@ -86,13 +105,13 @@ export function RegisterForm({ schools, classes = [] }) {
     return (
       <div className="flex flex-col items-center gap-4 py-6 text-center">
         <div className="flex size-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
-          <MailCheckIcon className="size-6" />
+          <CircleCheckIcon className="size-6" />
         </div>
         <div className="space-y-1">
           <p className="font-medium">注册申请已提交</p>
           <p className="text-sm text-muted-foreground">
-            验证链接已发送至 <span className="font-medium">{email}</span>，
-            请到邮箱点击验证后即可登录。
+            已用 <span className="font-medium">{doneLabel}</span> 提交。
+            请按提示完成验证后即可登录。
           </p>
         </div>
         <Button variant="outline" nativeButton={false} render={<Link href="/login" />}>
@@ -195,16 +214,26 @@ export function RegisterForm({ schools, classes = [] }) {
         </div>
       )}
       <div className="grid gap-2">
-        <Label htmlFor="reg-email">邮箱（登录账号）</Label>
+        <Label htmlFor="reg-identifier">
+          {identity === "student" ? "手机号（登录账号）" : "手机号 / 邮箱（登录账号）"}
+        </Label>
         <Input
-          id="reg-email"
-          type="email"
+          id="reg-identifier"
+          // 用 text 而非 email：email 类型会让移动端弹带 @ 的键盘，
+          // 而学生要输的是纯数字。inputMode 负责把数字键盘调出来。
+          type="text"
+          inputMode={identity === "student" ? "numeric" : "text"}
           required
-          autoComplete="email"
-          placeholder="name@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="username"
+          placeholder={identity === "student" ? "11 位手机号" : "手机号，或 name@example.com"}
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
         />
+        <p className="text-xs text-muted-foreground">
+          {identity === "student"
+            ? "手机号就是你的登录账号，请填常用号码。忘记密码需联系老师重置。"
+            : "教师可填手机号或邮箱，两种都能登录。"}
+        </p>
       </div>
       <div className="grid gap-2">
         <Label htmlFor="reg-password">密码</Label>

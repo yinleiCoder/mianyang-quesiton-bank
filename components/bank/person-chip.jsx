@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { avatarUrl } from "@/lib/oss-url"
-import { Building2Icon, MailIcon } from "lucide-react"
+import { displayEmail, formatPhone } from "@/lib/phone"
+import { Building2Icon, MailIcon, SmartphoneIcon } from "lucide-react"
 import { cn } from "cn"
 
 const initialOf = (name) => ((name || "?").trim().charAt(0) || "?").toUpperCase()
@@ -135,10 +136,19 @@ export function PersonChip({ person, caption, className }) {
                   <span className="truncate">{person.schoolName}</span>
                 </p>
               )}
-              {person.email && (
+              {/* 手机号与邮箱分两行显示，各自独立 —— 学生大多只有手机号。
+                  邮箱走 displayEmail 折叠：手机号账号的 email 是合成地址，
+                  印出来用户会以为自己有个怪邮箱。 */}
+              {person.phone && (
+                <p className="flex items-center gap-1.5">
+                  <SmartphoneIcon className="size-3.5 shrink-0" />
+                  <span className="truncate">{formatPhone(person.phone)}</span>
+                </p>
+              )}
+              {displayEmail(person.email) && (
                 <p className="flex items-center gap-1.5">
                   <MailIcon className="size-3.5 shrink-0" />
-                  <span className="truncate">{person.email}</span>
+                  <span className="truncate">{displayEmail(person.email)}</span>
                 </p>
               )}
             </div>

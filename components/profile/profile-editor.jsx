@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { avatarUrl } from "@/lib/oss-url"
+import { displayEmail, formatPhone } from "@/lib/phone"
 import { deleteOssObject } from "@/lib/upload"
 import { TIERS, formatLimit } from "@/lib/media-spec"
 import { Button } from "@/components/ui/button"
@@ -42,11 +43,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { MediaUploaderDialog } from "@/components/media-uploader"
-import { Loader2Icon, MailIcon, PencilIcon, Trash2Icon } from "lucide-react"
+import { Loader2Icon, MailIcon, PencilIcon, SmartphoneIcon, Trash2Icon } from "lucide-react"
 
 const NONE_SCHOOL = "__none__"
 
-export function ProfileEditor({ userId, email, roles, initial, schools }) {
+export function ProfileEditor({ userId, email, phone, roles, initial, schools }) {
   const router = useRouter()
   const supabaseRef = useRef(null)
   const getSb = () => (supabaseRef.current ??= createClient())
@@ -138,7 +139,11 @@ export function ProfileEditor({ userId, email, roles, initial, schools }) {
     setEmailDraft("")
   }
 
-  const initial2 = (name.trim() || email[0] || "?").slice(0, 1).toUpperCase()
+  // 手机号账号在 auth.users 里存的是合成邮箱（lib/phone.js），这里折叠掉。
+  // 空串表示「没有真实邮箱」，下面据此切到「未绑定」分支。
+  const realEmail = displayEmail(email)
+
+  const initial2 = (name.trim() || realEmail[0] || "?").slice(0, 1).toUpperCase()
 
   return (
     <div className="grid gap-4 lg:grid-cols-[20rem_1fr]">
@@ -196,13 +201,38 @@ export function ProfileEditor({ userId, email, roles, initial, schools }) {
             />
           </div>
 
+          {/* 手机号与邮箱**分两行**展示 —— 它们是两个独立字段，不是二选一。
+              手机号账号的 auth 邮箱是合成地址（见 lib/phone.js），必须折叠掉：
+              把 13800138000@phone.myquiz.cn 印出来，用户会以为自己有个怪邮箱。 */}
+          <div className="grid gap-1.5">
+            <Label>手机号</Label>
+            <span className="inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border border-input px-2.5 text-sm">
+              <SmartphoneIcon className="size-4 shrink-0 text-muted-foreground" />
+              {phone ? (
+                <span className="truncate">{formatPhone(phone)}</span>
+              ) : (
+                <span className="truncate text-muted-foreground">未绑定</span>
+              )}
+            </span>
+            <p className="text-xs text-muted-foreground">
+              {phone ? "手机号即登录账号，需要更换请联系学校管理员。" : "当前账号用邮箱登录。"}
+            </p>
+          </div>
+
           <div className="grid gap-1.5">
             <Label>邮箱</Label>
-            {!editingEmail ? (
+            {!realEmail ? (
+              // 手机号账号没有真实邮箱，**并且不提供"修改邮箱"**：
+              // 改掉会连带换掉登录凭据 —— 合成邮箱正是手机号登录的依据。
+              <span className="inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border border-input px-2.5 text-sm">
+                <MailIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate text-muted-foreground">未绑定</span>
+              </span>
+            ) : !editingEmail ? (
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-input px-2.5 text-sm">
                   <MailIcon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{email}</span>
+                  <span className="truncate">{realEmail}</span>
                 </span>
                 <Button type="button" variant="outline" size="sm" onClick={() => setEditingEmail(true)}>
                   <PencilIcon className="size-3.5" /> 修改邮箱
@@ -241,7 +271,9 @@ export function ProfileEditor({ userId, email, roles, initial, schools }) {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              更换邮箱需经验证（开启邮箱验证时向新邮箱发送确认邮件）。
+              {realEmail
+                ? "更换邮箱需经验证（开启邮箱验证时向新邮箱发送确认邮件）。"
+                : "本账号用手机号登录，暂未绑定邮箱。"}
             </p>
           </div>
 
