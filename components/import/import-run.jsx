@@ -35,6 +35,16 @@ import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon } from "lucide-re
 // 模型等待是这条流水线的大头（本地渲染之外就是它），并行掉它就够了。
 const PER_CLAIM = 3
 
+// ---------- 跑飞闸门（**改动前先读完**）----------
+// 2026-09-19 的事故：客户端存库一直失败、又一直重试，13 小时打了 6,600 万次请求，
+// 把实例 CPU 打满、日志管道打到丢包 99.9%（连排查都没法做，只能靠数据库计数器定位）。
+// 教训是：**数据库的租约只能保证"不重复入库"，拦不住客户端空转** —— 闸必须设在客户端，
+// 而且要设得笨一点：不去猜"什么情况下会空转"，只数「这一轮有没有一页真正存进库」，
+// 连着几轮都没有就停手并说明原因。
+const MAX_ROUNDS = 200 // 单次「继续解析」最多认领这么多轮（一轮最多 PER_CLAIM 页；与服务端每小时 600 页上限对齐）
+const MAX_IDLE_ROUNDS = 8 // 连续这么多轮一页都没落库 → 停下（正常一轮至少能存进一页）
+const MIN_ROUND_GAP_MS = 1000 // 两轮之间至少隔一秒：正常一轮要跑模型（十几秒），这行只为拦住"瞬间空转"
+
 // ---------- 单标签页运行锁 ----------
 // 为什么需要：两个标签页同时跑同一个任务时，库里的租约会让其中一方**解析完却存不进去**
 // （40001「该页已被其他标签页处理」）。两边都花了模型的钱，失败那侧还会不停重试，
@@ -105,8 +115,26 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
   async function runLane(laneId) {
     const supabase = createClient()
     const handle = fileRef.current
+    let rounds = 0
+    let idleRounds = 0
     for (;;) {
       if (stopRef.current) return
+      // 闸门一：轮数上限。到了就停，断点都在库里，点「继续解析」接着跑
+      if (rounds >= MAX_ROUNDS) {
+        setError(`一次最多连续解析 ${MAX_ROUNDS} 轮（约 ${MAX_ROUNDS * PER_CLAIM} 页），已停下。点「继续解析」可以从断点接着跑。`)
+        stopRef.current = true
+        return
+      }
+      // 闸门二：连着好几轮一页都没落库 —— 这时候再跑下去只是空转（这次的 6,600 万次请求就是这么来的）
+      if (idleRounds >= MAX_IDLE_ROUNDS) {
+        setError(
+          `连续 ${MAX_IDLE_ROUNDS} 轮都没有一页成功存进数据库，已停下（避免空转和重复花钱）。` +
+            `常见原因是数据库连接拥塞或上游限流；过几分钟点「继续解析」再试。`
+        )
+        stopRef.current = true
+        return
+      }
+      rounds += 1
       setLaneState((s) => ({ ...s, [laneId]: "认领中" }))
       const { data: claimed, error: claimErr } = await supabase.rpc("import_claim_pages", {
         p_job_id: job.id,
@@ -126,6 +154,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
       // 认领的页行直接并进本地状态：这一批的"待解析 → 解析中"立刻可见，无需查库
       onProgressPatch?.({ pages: claimed })
 
+      let savedThisRound = 0
       try {
         // 本地渲染：这一步最耗 CPU，也是"源文件不上传"的代价所在
         const t0 = Date.now()
@@ -179,6 +208,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
         // 继续跑只会重复调模型花钱，所以直接停下并说明原因（库里的租约不会被破坏，
         // 对方仍会把结果存好）。
         const saves = res?.saves ?? []
+        savedThisRound = saves.filter((s) => s.saved).length
         if (saves.length > 0 && saves.every((s) => s.conflict)) {
           setError("这个任务正被另一个标签页（或另一台设备）处理，本页面已停止，避免重复消耗解析额度。")
           stopRef.current = true
@@ -214,6 +244,11 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
         setError(err?.message ?? "解析失败")
         await sleep(2000)
       }
+
+      // 这一轮有没有一页真正落库？没有就记一次 idle（连着几轮都没有 → 上面那道闸会停手）。
+      // 结尾这一秒是**闸门三**：正常一轮要跑模型（十几秒），它只为拦住"瞬间空转"的循环。
+      idleRounds = savedThisRound > 0 ? 0 : idleRounds + 1
+      await sleep(MIN_ROUND_GAP_MS)
     }
   }
 
