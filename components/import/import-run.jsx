@@ -137,6 +137,12 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           if (prevTail && payload.text) payload.prev_tail = prevTail
           if (payload.text) prevTail = payload.text.slice(-200)
           if (payload.images?.length > 8) payload.images = payload.images.slice(0, 8)
+          // **租约是每页一份，不是一批一份**：import_claim_pages 逐行
+          // gen_random_uuid()，同一批认领回来的三页 token 各不相同。贴在素材上
+          // 而不是另外传一个"本批的 token"——token 与它那一页绑死，配错就不可能发生。
+          // （2026-09-18 起的写法是给整批用 claimed[0].lease_token：同批只有那一页
+          //   存得进去，另外两页被服务端判成「已被其他标签页处理」，白调模型还丢结果。）
+          payload.lease_token = p.lease_token
           payloads.push(payload)
         }
 
@@ -148,7 +154,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
         setLaneState((s) => ({ ...s, [laneId]: `解析第 ${claimed.map((p) => p.page_no).join("/")} 页` }))
         const res = await parseAndSavePages({
           jobId: job.id,
-          leaseToken: claimed[0].lease_token,
+          // 租约跟着每页的素材走（见上面 payload.lease_token），这里不再传"本批的 token"
           pages: payloads,
           opts: {
             genAnalysis: job.gen_analysis,
@@ -177,6 +183,17 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           setError("这个任务正被另一个标签页（或另一台设备）处理，本页面已停止，避免重复消耗解析额度。")
           stopRef.current = true
           return
+        }
+        // 模型的钱已经花了，结果却没进库（多是数据库连接池拥塞：实测一次 504 要等 125 秒）。
+        // **必须说出来**——以前这里是静默的：那几页永远停在"解析中"，用户只看到"跑着跑着不动了"，
+        // 既不知道发生了什么，也不知道那一页的钱已经白花了。
+        const unsaved = saves.filter((s) => !s.saved && !s.conflict)
+        if (unsaved.length > 0) {
+          setError(
+            `第 ${unsaved.map((s) => s.page_no).join("、")} 页的解析结果没能存进数据库` +
+              `（${unsaved[0].error ?? "未知原因"}）。这几页要重新解析——` +
+              `等 5 分钟让租约过期后点「继续解析」即可（重跑会再花一次模型的钱）。`
+          )
         }
         // 有页失败（多为上游限流/抽风）时歇一下再继续：服务端会把可重试的失败放回 pending，
         // 不 backoff 就会立刻重新认领同一页，把限流打得更死
