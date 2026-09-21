@@ -20,6 +20,7 @@ import { nodePathOf } from "@/lib/subject-nodes"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { UploadProgress } from "@/components/upload-progress"
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,8 @@ export function MaterialUploadDialog({ open, onOpenChange, nodes, onUploaded }) 
   const [picking, setPicking] = useState(false)
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
+  // { loaded, total }；null = 还没开始收到进度（签名阶段或大文件刚起步）
+  const [progress, setProgress] = useState(null)
 
   const accept = useMemo(() => acceptMap("material"), [])
 
@@ -52,6 +55,7 @@ export function MaterialUploadDialog({ open, onOpenChange, nodes, onUploaded }) 
     setNode(null)
     setFile(null)
     setBusy(false)
+    setProgress(null)
   }, [open])
 
   const onDrop = useCallback((accepted, rejected) => {
@@ -94,9 +98,13 @@ export function MaterialUploadDialog({ open, onOpenChange, nodes, onUploaded }) 
     if (!file) return toast.error("请选择要上传的文件")
 
     setBusy(true)
+    setProgress(null)
     try {
-      // ① 直传 OSS（签名由服务端代签，客户端拿不到 AccessKey）
-      const meta = await uploadToOSS(file, "material")
+      // ① 直传 OSS（签名由服务端代签，客户端拿不到 AccessKey）。
+      //    资料文档放宽到 2GB 之后这一步要按分钟算，必须给进度，否则用户会以为卡死。
+      const meta = await uploadToOSS(file, "material", {
+        onProgress: (loaded, total) => setProgress({ loaded, total }),
+      })
       // ② 落库。key 由服务端生成，这里只把它交回去登记。
       const supabase = createClient()
       const { error } = await supabase.rpc("create_review_material", {
@@ -210,6 +218,10 @@ export function MaterialUploadDialog({ open, onOpenChange, nodes, onUploaded }) 
               </p>
             </div>
           </div>
+
+          {busy && (
+            <UploadProgress loaded={progress?.loaded ?? 0} total={progress?.total ?? 0} />
+          )}
 
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>

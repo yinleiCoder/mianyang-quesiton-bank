@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client"
 import { uploadToOSS } from "@/lib/upload"
 import { acceptMap, limitsHint, tierFor, tooLargeMessage } from "@/lib/media-spec"
 import { Button } from "@/components/ui/button"
+import { UploadProgress } from "@/components/upload-progress"
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,8 @@ export function MediaUploaderDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [done, setDone] = useState(false)
+  // { loaded, total }；null = 还没开始收到进度（签名阶段或大文件刚起步）
+  const [progress, setProgress] = useState(null)
 
   // 预览地址随所选文件的生命周期管理：换文件/清空/卸载时释放上一张。
   // 副作用只能放 effect——setState 的 updater 必须是纯函数（StrictMode 下会被重复调用）。
@@ -73,6 +76,7 @@ export function MediaUploaderDialog({
     setFile(null)
     setError("")
     setDone(false)
+    setProgress(null)
   }, [])
 
   const accept = useMemo(() => acceptMap(purpose), [purpose])
@@ -123,8 +127,12 @@ export function MediaUploaderDialog({
     if (!file || busy) return
     setBusy(true)
     setError("")
+    setProgress(null)
     try {
-      const meta = await uploadToOSS(file, purpose)
+      const meta = await uploadToOSS(file, purpose, {
+        // 只在上传阶段有回调；签名那一步没有进度，此时仍显示"上传中…"
+        onProgress: (loaded, total) => setProgress({ loaded, total }),
+      })
       if (purpose === "question_media") {
         const supabase = createClient()
         const { error: rpcErr } = await supabase.rpc("register_media", {
@@ -198,6 +206,7 @@ export function MediaUploaderDialog({
               </div>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {busy && <UploadProgress loaded={progress?.loaded ?? 0} total={progress?.total ?? 0} />}
           </>
         )}
 
