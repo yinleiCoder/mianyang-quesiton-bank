@@ -39,6 +39,7 @@ import {
   FileStackIcon,
   FileUpIcon,
   FlagIcon,
+  FolderDownIcon,
   GitBranchIcon,
   GraduationCapIcon,
   InboxIcon,
@@ -93,6 +94,9 @@ function useNavItems(
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
     // 组卷库对所有登录用户可见（与题库同口径：已入库试卷全市共享，学生也能看）
     { title: "组卷库", url: "/papers", icon: FileStackIcon },
+    // 复习资料：全市共享，所有登录用户都能看；上传/删除按钮由页面按角色与归属画。
+    // 形状与题库一致 —— 内容型入口，不做角色分叉。
+    { title: "复习资料", url: "/materials", icon: FolderDownIcon },
     // 学生名册。放在「导航」而不是「管理台」：教师不是管理员，但他也要看本专业的学生。
     // 标签按角色变 —— 同一条路由三种口径，服务端各自筛各自的（见 lib/students.js）。
     ...(isTeacher || isSchoolAdmin || isAdmin
