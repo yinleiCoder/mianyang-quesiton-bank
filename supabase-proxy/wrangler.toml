@@ -1,0 +1,22 @@
+# 只在用 wrangler CLI 部署时需要（后台粘贴代码的方式不需要这个文件）。
+#
+#   cd supabase-proxy && npx wrangler deploy
+#
+# 前提：myquiz.cn 这个 zone 已经托管在 Cloudflare 账号下。
+# 没有它，下面的 routes 会报 zone 找不到 —— 先做 README 里「前置：DNS」那一节。
+
+name = "supabase-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# 自定义域名。zone 就位后取消注释再 deploy，wrangler 会自己建好 DNS 记录与证书。
+# 注意是 **custom_domain**，不是普通 route —— 普通 route 需要请求先解析到 Cloudflare 的
+# 代理 IP，而这里的记录是灰云（DNS only）。
+#
+# routes = [
+#   { pattern = "api.myquiz.cn", custom_domain = true },
+# ]
+
+[observability]
+# Workers 的日志默认不留存，排障时看不到任何东西。开着不花钱。
+enabled = true
