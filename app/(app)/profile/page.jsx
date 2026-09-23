@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { ownRoleLabels } from "@/lib/roles"
 import { ProfileEditor } from "@/components/profile/profile-editor"
+import { PasswordCard } from "@/components/profile/password-card"
 import { PageHeader } from "@/components/page-header"
 
 export const metadata = { title: "个人资料" }
@@ -41,6 +42,8 @@ export default async function ProfilePage() {
         }}
         schools={schools ?? []}
       />
+      {/* 改密走 Supabase 原生 updateUser，需要账号邮箱（手机号账号是合成邮箱，与登录同口径） */}
+      <PasswordCard email={ctx.user.email} />
     </div>
   )
 }

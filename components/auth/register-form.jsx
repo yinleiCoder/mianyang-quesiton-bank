@@ -231,7 +231,7 @@ export function RegisterForm({ schools, classes = [] }) {
         />
         <p className="text-xs text-muted-foreground">
           {identity === "student"
-            ? "手机号就是你的登录账号，请填常用号码。忘记密码需联系老师重置。"
+            ? "手机号就是你的登录账号，请填常用号码。忘记密码可用手机号加姓名自助重置。"
             : "教师可填手机号或邮箱，两种都能登录。"}
         </p>
       </div>

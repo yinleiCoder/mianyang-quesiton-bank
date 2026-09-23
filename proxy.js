@@ -16,7 +16,8 @@ import { NextResponse } from "next/server"
 import { createProxyClient } from "@/lib/supabase/proxy"
 
 // 无需登录的公开页（均在 (auth) 路由组）
-const AUTH_PAGES = ["/login", "/register"]
+// /reset-password 必须在列：忘记密码的人**恰恰是登不上的那批人**，漏登记就会被挡回登录页
+const AUTH_PAGES = ["/login", "/register", "/reset-password"]
 
 // 登录后访问的受保护路径前缀（与 (app) 路由组内页面 URL 一致）
 const PROTECTED_PREFIXES = ["/dashboard", "/questions", "/review", "/admin", "/bank", "/papers", "/materials", "/profile", "/students"]

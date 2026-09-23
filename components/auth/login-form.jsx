@@ -94,10 +94,14 @@ export function LoginForm({ next }) {
           注册账号
         </Link>
       </div>
-      {/* 站内反馈入口在登录后才有，而登不上的人恰恰最需要联系管理员——这里留一句人工通道。
-          免短信方案下没有自助找回密码（没有邮箱、没有短信），这条人工通道是唯一退路。 */}
+      {/* 人工通道仍然留着（姓名记错、手机号换了的同学只能走这条），
+          但绝大多数情况可以自助：凭手机号/邮箱 + 注册姓名自己设新密码。 */}
       <p className="text-center text-xs text-muted-foreground">
-        忘记密码或登录不上？联系你所在学校的管理员或任课教师重置。
+        忘记密码？{" "}
+        <Link href="/reset-password" className="font-medium text-primary underline-offset-4 hover:underline">
+          用手机号/邮箱和姓名重置
+        </Link>
+        ；姓名也记不清或号码已换，联系你所在学校的管理员或任课教师。
       </p>
     </form>
   )
