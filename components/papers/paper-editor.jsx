@@ -272,19 +272,26 @@ export function PaperEditor({ initialSnapshot, nodes }) {
         onDragCancel={() => setActiveRow(null)}
       >
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[19rem_minmax(0,1fr)_17rem]">
-          <aside className="min-h-0 rounded-xl border p-3">
-            <h2 className="mb-2 text-sm font-medium">题库选题</h2>
-            <QuestionPicker
-              nodes={nodes}
-              defaultNodeId={initialSnapshot?.course_node_id ?? ""}
-              targetSections={state.sections}
-              targetSectionKey={effectiveTargetKey}
-              onTargetSectionChange={setTargetSectionKey}
-              onAdd={(row) =>
-                dispatch({ type: "itemsAdd", index: targetIndex, items: [itemFromBank(row)] })
-              }
-              existingIds={existingIds}
-            />
+          {/* 左栏必须是「标题 + 占满剩余高度的选择器」两段式：选择器自己的根节点是 h-full
+              （它要占满父容器）。标题直接当兄弟节点排在它上面时，h-full 量的是**整个 aside
+              的内容高度**，于是「共 xx 题 / 上一页 / 下一页」这一行被顶到边框外面去——
+              左右两栏都看不出来（它们有 overflow-y-auto 兜着），只有左栏会露出来。
+              所以给选择器套一个 min-h-0 flex-1 的壳：它的高度是确定的，h-full 才有意义。 */}
+          <aside className="flex min-h-0 flex-col rounded-xl border p-3">
+            <h2 className="mb-2 shrink-0 text-sm font-medium">题库选题</h2>
+            <div className="min-h-0 flex-1">
+              <QuestionPicker
+                nodes={nodes}
+                defaultNodeId={initialSnapshot?.course_node_id ?? ""}
+                targetSections={state.sections}
+                targetSectionKey={effectiveTargetKey}
+                onTargetSectionChange={setTargetSectionKey}
+                onAdd={(row) =>
+                  dispatch({ type: "itemsAdd", index: targetIndex, items: [itemFromBank(row)] })
+                }
+                existingIds={existingIds}
+              />
+            </div>
           </aside>
 
           <main className="min-h-0 overflow-y-auto rounded-xl border p-3">

@@ -221,9 +221,11 @@ export function QuestionPicker({
         })}
       </div>
 
-      <div className="flex items-center justify-between border-t pt-2 text-xs text-muted-foreground">
-        <span>共 {count} 题</span>
-        <div className="flex items-center gap-1">
+      {/* 左栏只有 19rem 宽，"共 1234 题" + 两个按钮 + 页码正好卡在边界上：
+          flex-wrap 让它在挤不下时整体折行，而不是把「下一页」推出边框 */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t pt-2 text-xs text-muted-foreground">
+        <span className="shrink-0 tabular-nums">共 {count} 题</span>
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             size="sm"
             variant="ghost"
