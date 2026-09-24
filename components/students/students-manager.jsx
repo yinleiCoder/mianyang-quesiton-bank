@@ -183,6 +183,13 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
           <span className="text-muted-foreground">
             最近练习 {fmtDateTime24(selectedClass.last_practiced_at) || "暂无"}
           </span>
+          {/* 班级维度的学情在 /classes/[id]：名册只管"找人"，看板管"这个班怎么样" */}
+          <Link
+            href={`/classes/${selectedClass.class_id}`}
+            className="ml-auto rounded-lg border px-2.5 py-1 text-xs hover:bg-muted"
+          >
+            查看班级学情 →
+          </Link>
         </div>
       )}
 

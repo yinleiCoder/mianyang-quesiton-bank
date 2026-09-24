@@ -20,7 +20,7 @@ import { createProxyClient } from "@/lib/supabase/proxy"
 const AUTH_PAGES = ["/login", "/register", "/reset-password"]
 
 // 登录后访问的受保护路径前缀（与 (app) 路由组内页面 URL 一致）
-const PROTECTED_PREFIXES = ["/dashboard", "/questions", "/review", "/admin", "/bank", "/papers", "/materials", "/profile", "/students"]
+const PROTECTED_PREFIXES = ["/dashboard", "/questions", "/review", "/admin", "/bank", "/papers", "/materials", "/profile", "/students", "/classes", "/lecture"]
 
 export async function proxy(request) {
   const { supabase, getResponse } = createProxyClient(request)

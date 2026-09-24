@@ -12,6 +12,7 @@ import { fmtDate } from "@/lib/format"
 import { round2 } from "@/lib/paper-model"
 import { PaperSheet } from "@/components/papers/paper-sheet"
 import { PaperActions } from "@/components/papers/paper-actions"
+import { PaperInsightLinks } from "@/components/papers/paper-insight-links"
 import { AccessDenied } from "@/components/access-denied"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -107,6 +108,13 @@ export default async function PaperDetailPage({ params }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* 成绩排行 / 试题分析：所有人可见（学生也要看自己的位置）；
+              讲评模式只给教师（投屏用）。都只在已入库的卷子上出现 */}
+          <PaperInsightLinks
+            paperId={paper.id}
+            published={snapshot.status === "published"}
+            canLecture={ctx.isTeacher || ctx.isSchoolAdmin || ctx.isAdmin}
+          />
           {/* 阅卷入口只给有权限的人（试卷作者/本校管理员/系统管理员）。
               真正的权限判断在 RPC 里，这里只是不给一个点了会被拒的入口 */}
           {snapshot.status === "published" && (isOwner || ctx.isSchoolAdmin || ctx.isAdmin) && (

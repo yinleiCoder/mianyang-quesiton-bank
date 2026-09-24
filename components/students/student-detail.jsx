@@ -5,7 +5,8 @@
 //（/dashboard 引进 recharts 后首屏 1.4 MB 的教训还写在 docs/加速落地手册.md 里）。
 import Link from "next/link"
 import { accuracyPercent, gradeLabel } from "@/lib/students"
-import { indexNodes, nodePathOf } from "@/lib/subject-nodes"
+import { indexNodes, nodePathOf, rollUpByTopNode } from "@/lib/subject-nodes"
+import { accuracyBarColor } from "@/lib/analytics"
 import { qtypeLabel } from "@/lib/question-model"
 import { fmtDate, fmtDateTime24 } from "@/lib/format"
 import { avatarUrl } from "@/lib/oss-url"
@@ -40,12 +41,12 @@ export function StudentDetail({ detail, nodes }) {
   const sessions = detail.sessions ?? []
   const wrong = detail.wrong_questions ?? []
   const exams = detail.exams ?? []
-  const { byId } = indexNodes(nodes ?? [])
+  const { byId } = indexNodes(nodes ?? []) // 供节点路径用；掌握度上卷在 rollUpByTopNode 里自己建索引
 
   // 汇总口径与名册页一致：正确率的分母是**客观题**（主观自评题的 is_correct 恒为 null，混进去会压低）
   const answered = sessions.reduce((n, x) => n + (Number(x.answered_count) || 0), 0)
   const durationMs = sessions.reduce((n, x) => n + (Number(x.duration_ms) || 0), 0)
-  const nodeGroups = rollUpByTopNode(detail.node_accuracy ?? [], byId)
+  const nodeGroups = rollUpByTopNode(detail.node_accuracy ?? [], nodes ?? [])
 
   return (
     <div className="space-y-4">
@@ -68,7 +69,21 @@ export function StudentDetail({ detail, nodes }) {
                   （138…@phone.myquiz.cn），直接印出来会让人以为学生有个怪邮箱。 */}
               <Info label="手机号" value={s.phone ? formatPhone(s.phone) : "未绑定"} />
               <Info label="邮箱" value={displayEmail(s.email) || "未绑定"} />
-              <Info label="班级" value={s.class_name ?? "未分班"} warn={!s.class_id} />
+              {/* 班级可点：从单个学生跳到"这个班整体怎么样"是教师最自然的下一步 */}
+              <Info
+                label="班级"
+                value={
+                  s.class_id ? (
+                    <Link href={`/classes/${s.class_id}`} className="hover:underline">
+                      {s.class_name ?? "（未命名班级）"} ·
+                      <span className="text-muted-foreground">班级学情 →</span>
+                    </Link>
+                  ) : (
+                    "未分班"
+                  )
+                }
+                warn={!s.class_id}
+              />
               <Info label="入学年份" value={gradeLabel(s.enroll_year)} />
               <Info label="专业大类" value={s.major_category} />
               <Info label="专业" value={s.major} />
@@ -112,7 +127,7 @@ export function StudentDetail({ detail, nodes }) {
                   </span>
                   <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
                     <span
-                      className={`block h-full rounded-full ${barColor(g.accuracy)}`}
+                      className={`block h-full rounded-full ${accuracyBarColor(g.accuracy)}`}
                       style={{ width: `${Math.round(g.accuracy * 100)}%` }}
                     />
                   </span>
@@ -334,35 +349,6 @@ function overallAccuracy(nodeAccuracy) {
 
 // 把课程级统计上卷到**顶层节点**（专业大类 / 公共学科）。
 // 不上卷的话一门课一条，几十个碎条根本读不出"哪块弱"。
-function rollUpByTopNode(nodeAccuracy, byId) {
-  const grouped = new Map()
-  for (const row of nodeAccuracy) {
-    const top = topAncestor(byId, row.node_id)
-    const cur = grouped.get(top.id) ?? { id: top.id, name: top.name, attempts: 0, correct: 0 }
-    cur.attempts += Number(row.attempts) || 0
-    cur.correct += Number(row.correct) || 0
-    grouped.set(top.id, cur)
-  }
-  return [...grouped.values()]
-    .filter((g) => g.attempts > 0)
-    .map((g) => ({ ...g, accuracy: g.correct / g.attempts }))
-    .sort((a, b) => a.accuracy - b.accuracy) // 最弱的排最前
-}
-
-function topAncestor(byId, nodeId) {
-  let cur = byId.get(nodeId)
-  if (!cur) return { id: nodeId ?? "unknown", name: "未选节点" }
-  // 树最多三层，直接往上走到顶；父节点查不到（数据被删）时就停在当前层
-  while (cur.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)
-  return cur
-}
-
-function barColor(accuracy) {
-  if (accuracy < 0.5) return "bg-rose-500/80"
-  if (accuracy < 0.75) return "bg-amber-500/80"
-  return "bg-emerald-500/80"
-}
-
 // 毫秒 → 人话。练习动辄几十秒，所以不足 1 分钟显示秒。
 function humanDuration(ms) {
   const n = Number(ms) || 0

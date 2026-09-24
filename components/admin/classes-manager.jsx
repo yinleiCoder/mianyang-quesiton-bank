@@ -167,6 +167,15 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
+                        {/* 建完班顺手能点进去看这个班的学情（教师端的主入口在名册页） */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          nativeButton={false}
+                          render={<Link href={`/classes/${c.class_id}`} />}
+                        >
+                          学情
+                        </Button>
                         <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
                           编辑
                         </Button>
