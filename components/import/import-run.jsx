@@ -160,11 +160,10 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
         const t0 = Date.now()
         setLaneState((s) => ({ ...s, [laneId]: `渲染第 ${claimed.map((p) => p.page_no).join("/")} 页` }))
         const payloads = []
-        let prevTail = null
         for (const p of claimed) {
+          // 上一页的末尾由 buildPagePayload 按页号现取（文字片段或底部截图），
+          // **不再在这里按批内顺序传递**：那样跨批、跨车道的那道跨页题正好断在缝里。
           const payload = await buildPagePayload(handle, p.page_no, "auto", "high")
-          if (prevTail && payload.text) payload.prev_tail = prevTail
-          if (payload.text) prevTail = payload.text.slice(-200)
           if (payload.images?.length > 8) payload.images = payload.images.slice(0, 8)
           // **租约是每页一份，不是一批一份**：import_claim_pages 逐行
           // gen_random_uuid()，同一批认领回来的三页 token 各不相同。贴在素材上
@@ -177,7 +176,11 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
 
         const tReady = Date.now()
         const bytes = payloads.reduce(
-          (n, x) => n + (x.images ?? []).reduce((m, i) => m + i.data_url.length, 0),
+          (n, x) =>
+            n +
+            (x.images ?? []).reduce((m, i) => m + i.data_url.length, 0) +
+            // 上一页底部那张（跨页拼接用）也算进"上传了多少"
+            (x.prev_images ?? []).reduce((m, i) => m + i.data_url.length, 0),
           0
         )
         setLaneState((s) => ({ ...s, [laneId]: `解析第 ${claimed.map((p) => p.page_no).join("/")} 页` }))

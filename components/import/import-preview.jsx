@@ -108,21 +108,41 @@ export function ImportPreview({ job, items, onRefresh }) {
   }, [items, optimistic])
 
   const list = useMemo(() => view.filter(FILTERS.find((f) => f.key === filter).match), [view, filter])
+
+  // 跨页合并的结果：下一页把上一页末尾那半截并成了完整题，上一页那条残题就该丢掉。
+  // 不自动写库（那样会跟教师手动的勾选打架），只把它标出来 + 在「全部保留」时跳过——
+  // 那道残题本身是能过入库校验的，不拦一下就会以"半句话"的形态混进题库。
+  const mergedPages = useMemo(
+    () => new Set(view.filter((i) => i.flags.includes("merged_cross_page")).map((i) => i.page_no)),
+    [view]
+  )
+  const superseded = (it) =>
+    it.flags.includes("cross_page") &&
+    !it.flags.includes("merged_cross_page") &&
+    mergedPages.has(it.page_no + 1)
   // 默认全部保留；缺答案的不勾（入库必然被 DB 拒），但教师可以手动勾上作为"待补"占位
   const keptIds = useMemo(
     () => view.filter((i) => i.status === "kept" || i.status === "imported").map((i) => i.id),
     [view]
   )
 
-  // 批量勾选时跳过"入库必被拒"的题：与其让它们到入库时报错，不如现在就留下让人补
+  // 批量勾选时跳过两类：入库必被拒的（缺答案），以及已被下一页合并掉的残题
   async function keepAll() {
-    const ok = list.filter((i) => i.status === "pending" && draftIssues(i.qtype, i.content).length === 0)
-    const bad = list.filter((i) => i.status === "pending" && draftIssues(i.qtype, i.content).length > 0)
-    if (ok.length === 0 && bad.length === 0) return
+    const pending = list.filter((i) => i.status === "pending")
+    const stale = pending.filter((i) => superseded(i))
+    const rest = pending.filter((i) => !superseded(i))
+    const ok = rest.filter((i) => draftIssues(i.qtype, i.content).length === 0)
+    const bad = rest.filter((i) => draftIssues(i.qtype, i.content).length > 0)
+    if (ok.length === 0 && bad.length === 0 && stale.length === 0) return
     if (ok.length > 0) await setStatus(ok.map((i) => i.id), "kept")
     if (bad.length > 0) {
-      toast.warning(`已保留 ${ok.length} 道；另有 ${bad.length} 道缺答案或空位对不上，请用「补答案」逐题补全`)
+      const staleNote = stale.length > 0 ? `、${stale.length} 道已在下一页合并成完整题（不勾选）` : ""
+      toast.warning(
+        `已保留 ${ok.length} 道；另有 ${bad.length} 道缺答案或空位对不上，请用「补答案」逐题补全${staleNote}`
+      )
       setFilter("noanswer")
+    } else if (stale.length > 0) {
+      toast.warning(`已保留 ${ok.length} 道；${stale.length} 道被下一页合并成了完整题，未勾选（在下一页）`)
     } else {
       toast.success(`已保留 ${ok.length} 道`)
     }
@@ -298,6 +318,14 @@ export function ImportPreview({ job, items, onRefresh }) {
                     {FLAG_LABELS[f]?.text ?? f}
                   </span>
                 ))}
+                {superseded(it) && (
+                  <span
+                    title={`第 ${it.page_no + 1} 页已经给出拼好的完整题：这一条是页尾的半截，不用勾选`}
+                    className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
+                  >
+                    已被下一页合并
+                  </span>
+                )}
                 {it.status === "imported" && (
                   <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">已入库</span>
                 )}

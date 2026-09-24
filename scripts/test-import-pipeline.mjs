@@ -198,6 +198,81 @@ console.log("\n【13】选项前缀剥离不得误伤正文（RAM 开头的选�
   ok(it3.content.options[0].label[0].text === "x 轴表示时间", "无分隔符时不当成前缀", it3.content.options[0].label[0].text)
 }
 
+console.log("\n【14】模型报的跨页标记要落进 flags（白名单），未知标记一律丢掉")
+{
+  // 页尾那半截：提示词要求写 flags 里的 cross_page_to_next，或题目级的布尔
+  const tail = normalizeQuestion({
+    qtype: "short_answer",
+    stem: "（本页末）请说明内存与外存的区别，并",
+    answer: { samples: ["答案"] },
+    flags: ["cross_page_to_next"],
+  })
+  ok(tail.flags.includes("cross_page"), "cross_page_to_next → cross_page", tail.flags)
+
+  const tail2 = normalizeQuestion({
+    qtype: "short_answer",
+    stem: "同上，用布尔写法",
+    answer: { samples: ["答案"] },
+    cross_page_to_next: true,
+  })
+  ok(tail2.flags.includes("cross_page"), "布尔写法也认", tail2.flags)
+
+  // 页首的续写：拼完整的那条要标成 merged_cross_page
+  const head = normalizeQuestion({
+    qtype: "short_answer",
+    stem: "内存断电即失，外存断电仍在。",
+    answer: { samples: ["答案"] },
+    flags: ["cross_page_from_prev"],
+  })
+  ok(head.flags.includes("merged_cross_page"), "cross_page_from_prev → merged_cross_page", head.flags)
+
+  // 白名单：模型自创的标记不能进库（import_job_items.flags 上有 check 约束）
+  const junk = normalizeQuestion({
+    qtype: "true_false",
+    stem: "题",
+    answer: { value: true },
+    flags: ["figure", "uncertain", "CROSS_PAGE", "has_figure"],
+  })
+  ok(!junk.flags.includes("figure") && !junk.flags.includes("uncertain"), "自创标记被丢掉", junk.flags)
+  ok(junk.flags.includes("cross_page"), "大写也认（统一小写后匹配）", junk.flags)
+  ok(junk.flags.includes("has_figure"), "已知标记照常保留", junk.flags)
+}
+
+console.log("\n【15】跨页的上下文确实进了 user 消息，且排在本页内容之前")
+{
+  const { buildPageParts } = await import("@/lib/import-prompts")
+  const parts = buildPageParts({
+    pageNo: 7,
+    text: "本页的正文",
+    prevTail: "上一页结尾的半句话",
+    images: [{ dataUrl: "data:image/jpeg;base64,AAA" }],
+  })
+  const texts = parts.filter((p) => p.type === "text").map((p) => p.text)
+  const prevIdx = texts.findIndex((t) => t.includes("上一页结尾的半句话"))
+  const bodyIdx = texts.findIndex((t) => t.includes("本页的正文"))
+  ok(prevIdx >= 0, "上一页末尾在消息里")
+  ok(prevIdx < bodyIdx, "排在本页正文之前", { prevIdx, bodyIdx })
+  ok(texts.some((t) => t.includes("不要把它当成这一页的内容")), "说明它不是本页内容")
+
+  // 扫描件路径：没有文字，给的是上一页底部截图
+  const scan = buildPageParts({
+    pageNo: 8,
+    prevImages: [{ dataUrl: "data:image/jpeg;base64,BBB" }],
+    images: [{ dataUrl: "data:image/jpeg;base64,CCC" }, { dataUrl: "data:image/jpeg;base64,DDD" }],
+  })
+  const imgs = scan.filter((p) => p.type === "image_url")
+  ok(imgs.length === 3, "上一页底部 + 本页两张切片", imgs.length)
+  ok(imgs[0].image_url.url.endsWith("BBB"), "上一页的图排在最前")
+  ok(
+    scan.find((p) => p.type === "text" && p.text.includes("以上")).text.includes("2 张图是第 8 页"),
+    "本页切片张数的说明不受上一页那张图影响"
+  )
+
+  // 第 1 页没有上一页：不该凭空造出上下文（只看上下文块，USER_TAIL 里本来就提到"上一页"）
+  const first = buildPageParts({ pageNo: 1, text: "第一页" })
+  ok(!first.some((p) => p.type === "text" && p.text.includes("【上一页")), "第 1 页没有上一页上下文")
+}
+
 console.log(`
 通过 ${pass} 项，失败 ${fail} 项`)
 process.exit(fail === 0 ? 0 : 1)

@@ -480,6 +480,9 @@ export async function readImage(file) {
  * 把「第 pageNo 页」变成接口要的素材：文字路径给 text，视觉路径给图片切片。
  * mode 传 "auto" 时按该页实际情况判断（有文字层走文本，含图额外附一张低清图）。
  *
+ * 另外附上**上一页的末尾**（prev_tail 原文片段 或 prev_images 底部截图，见 prevPageContext）：
+ * 跨页的题只有靠它才能拼成完整的一题。
+ *
  * 参数**只有一个源对象**（fileRef.current 的规范形状，见下），不要再加第二个对象——
  * 之前这里同时收 picked 与 handle 两个对象，而它们的键名不一样（handle vs pdf），
  * 结果跑批循环传进来时 `picked.handle` 是 undefined，报「Cannot read properties of undefined (reading 'probe')」。
@@ -494,12 +497,14 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
   if (file.kind === "image") {
     const img = file.images[pageNo - 1]
     if (!img) throw new Error(`第 ${pageNo} 张图片不存在（选择的图片数量对不上）`)
-    return { page_no: pageNo, mode: "vision", images: [{ data_url: img.dataUrl, w: 0, h: 0 }], detail }
+    const payload = { page_no: pageNo, mode: "vision", images: [{ data_url: img.dataUrl, w: 0, h: 0 }], detail }
+    return Object.assign(payload, (await prevPageContext(file, pageNo, detail)) ?? {})
   }
   if (file.kind === "docx") {
     // Word 没有页：这里的"第 pageNo 批"是切好的题块分组（见 lib/docx-client.js 的 docxBatches）。
     // 每批都是**完整题块的并集**，所以不会出现"题干在这批、选项在下批"的残缺题；
     // 批与批之间也不重叠，于是同一道题不会被重复解析。
+    // 也因此没有"跨页拼接"这回事：批边界本来就落在两道题之间（prevPageContext 对 docx 返回 null）。
     const batch = file.batches?.[pageNo - 1]
     if (!batch) throw new Error(`第 ${pageNo} 批不存在（这份文档只有 ${file.batches?.length ?? 0} 批）`)
     return {
@@ -519,9 +524,89 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
   if (useMode === "vision" || useMode === "hybrid") {
     // 上下切两片（1×2）：按官方 1300×1300 的缩放目标，A4@180dpi 每片约 1.57M 像素，
     // 正好在阈值内——不再被上游二次缩放，宽度还比整页送多约 36%
-    const rendered = await file.handle.renderPage(pageNo, { mode: "tiles", columns: 1, rows: 2 })
+    const rendered = await file.handle.renderPage(pageNo, { mode: "tiles", columns: TILE_COLUMNS, rows: TILE_ROWS })
     payload.images = rendered.tiles.map((t) => ({ data_url: t.dataUrl, w: t.w, h: t.h }))
     payload.detail = detail
   }
-  return payload
+  // 上一页的末尾放最后取：两页的位图不同时驻留，峰值内存与以前一样
+  return Object.assign(payload, (await prevPageContext(file, pageNo, detail)) ?? {})
+}
+
+// ---------- 上一页的末尾（跨页拼接的上下文） ----------
+//
+// 一道题被页边界切开时，本页只能看见后半截；模型得先看到上一页的末尾，才可能把它拼成
+// 一整个题干（见 lib/import-prompts.js 的硬性规则第 7 条）。
+//
+// **必须按页号现取，不能只在批内传递**：一次认领只有 PER_CLAIM 页，批与批之间、以及两条
+// 并发的车道之间都会断——跨页的题恰好就卡在这些断点上（旧写法只在同批内传 prev_tail，
+// 且只认文字页，于是扫描件永远拼不起来，正是教师反馈的"衔接不上"）。
+//
+// 取法按上一页的真实形态二选一：
+//   · 有文字层 → 原文末尾片段（便宜，且长题干也能拼全）；
+//   · 扫描件 → 上一页的**底部切片**（与页面切片同一缩放比例，不额外缩小）。
+// 取不到就返回 null：少一段上下文不该让这一页解析失败。
+const PREV_TAIL_CHARS = 600
+// 文字层薄到这个程度就当它没有：扫描件常有"第 3 页"这种页眉文字层，
+// 拿它当跨页上下文等于没给（该给底部截图）。
+const MIN_TEXT_CHARS = 20
+// 切片几何：本页与"上一页底部"必须用同一套，否则模型看到的比例对不上
+const TILE_COLUMNS = 1
+const TILE_ROWS = 2
+
+async function prevPageContext(file, pageNo, detail) {
+  if (pageNo <= 1) return null
+  // Word 的"批"是按题切好的，不存在半截题；图片与 PDF 才需要
+  if (file.kind === "docx") return null
+  try {
+    if (file.kind === "image") {
+      const prev = file.images?.[pageNo - 2]
+      if (!prev) return null
+      const dataUrl = await bottomHalfOf(prev.dataUrl)
+      return dataUrl ? { prev_images: [{ data_url: dataUrl, w: 0, h: 0 }] } : null
+    }
+    if (!file.handle) return null
+    // 先看文字层（一次文本抽取，比 probe 便宜）：够厚就直接给原文片段
+    const text = (await file.handle.getPageText(pageNo - 1)).trim()
+    if (text.length >= MIN_TEXT_CHARS) return { prev_tail: text.slice(-PREV_TAIL_CHARS) }
+    // 否则是扫描件：给上一页的底部切片
+    const rendered = await file.handle.renderPage(pageNo - 1, {
+      mode: "tiles",
+      columns: TILE_COLUMNS,
+      rows: TILE_ROWS,
+    })
+    // 最后一行的切片就是页面底部（1×2 时即下半页）
+    const bottom = rendered.tiles.slice((TILE_ROWS - 1) * TILE_COLUMNS)
+    return bottom.length
+      ? { prev_images: bottom.map((t) => ({ data_url: t.dataUrl, w: t.w, h: t.h })) }
+      : null
+  } catch {
+    return null
+  }
+}
+
+// 图片素材（拍照/截图）：上一张的下半页。解码出的原图可能很大（手机照片 4000×3000），
+// 画完立刻把 canvas 归零释放，理由同 lib/pdf-client.js 的 renderPage。
+async function bottomHalfOf(dataUrl) {
+  const img = await new Promise((resolve, reject) => {
+    const el = new Image()
+    el.onload = () => resolve(el)
+    el.onerror = () => reject(new Error("图片解码失败"))
+    el.src = dataUrl
+  })
+  const sw = img.naturalWidth
+  const sh = Math.floor(img.naturalHeight / 2)
+  if (sw <= 0 || sh <= 0) return null
+  const canvas = document.createElement("canvas")
+  canvas.width = sw
+  canvas.height = sh
+  try {
+    const ctx = canvas.getContext("2d", { alpha: false })
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, sw, sh)
+    ctx.drawImage(img, 0, sh, sw, sh, 0, 0, sw, sh)
+    return canvas.toDataURL("image/jpeg", 0.72)
+  } finally {
+    canvas.width = 0
+    canvas.height = 0
+  }
 }
