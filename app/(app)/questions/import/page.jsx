@@ -41,7 +41,7 @@ export default async function ImportQuestionPage({ searchParams }) {
         <EmptyState
           icon={FileUpIcon}
           title="还没有可挂题的科目节点"
-          description="题目必须挂在「公共学科」或「课程」节点下。请先让系统管理员在科目树里建好节点。"
+          description="题目要挂在科目树的节点上（公共学科、专业大类、专业、课程都可以）。请先让系统管理员在科目树里建好节点。"
         />
       </div>
     )

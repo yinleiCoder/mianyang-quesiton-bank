@@ -1,6 +1,6 @@
 "use client"
 
-// 题目所属课程节点选择：可挂题节点（公共-学科 / 专业-课程）且未冻结才可选。
+// 题目所属科目节点选择：可挂题节点（任意层级）且未冻结才可选。
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,7 +29,7 @@ export function NodeField({ nodes, value, onChange }) {
       ) : (
         <Button variant="outline" className="w-full justify-start" onClick={() => setOpen(true)}>
           <FolderTreeIcon className="size-4 text-muted-foreground" />
-          选择科目节点（公共学科 / 专业课程）
+          选择科目节点（公共学科 / 专业大类 / 专业 / 课程）
         </Button>
       )}
       <TreePicker
@@ -38,7 +38,7 @@ export function NodeField({ nodes, value, onChange }) {
         nodes={nodes}
         pickable={canPick}
         title="选择题目所属科目"
-        hint="可挂题的节点：公共科目的学科节点、专业目录的课程节点（已冻结的不可选）。挂到某节点即覆盖该节点，与任命路由无关（题目路由只看题目挂靠节点）。"
+        hint="任意层级的节点都能挂题：公共学科、专业大类、专业、课程（已冻结的不可选）。挂到某节点即覆盖该节点，与任命路由无关（题目路由只看题目挂靠节点）。"
         onSelect={(node) => {
           if (canPick(node)) onChange(node.id)
         }}

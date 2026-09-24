@@ -33,7 +33,7 @@ export default async function NewQuestionPage() {
       <EmptyState
         icon={FolderTreeIcon}
         title="科目树还没有可挂题的节点"
-        description="请联系系统管理员到「科目树维护」创建公共学科（语文/数学/英语…）或专业课程节点后即可出题。"
+        description="请联系系统管理员到「科目树维护」创建公共学科（语文/数学/英语…）或专业目录（专业大类 → 专业 → 课程）节点后即可出题。"
         action={
           ctx.isAdmin ? (
             <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/admin/tree" />}>

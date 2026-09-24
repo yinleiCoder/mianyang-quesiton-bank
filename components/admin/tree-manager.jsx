@@ -25,7 +25,6 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import {
   buildTrees,
   childKinds,
-  isAttachable,
   kindLabel,
   scopeLabel,
   KIND_LABELS,
@@ -58,11 +57,8 @@ function NodeRow({ entry, depth, onOpenDialog, onFreeze }) {
         <Badge variant="secondary" className="shrink-0 text-xs">
           {kindLabel(node.kind)}
         </Badge>
-        {isAttachable(node.kind) && !node.is_frozen && (
-          <Badge variant="outline" className="shrink-0 text-xs text-emerald-600">
-            可挂题
-          </Badge>
-        )}
+        {/* 原先这里有个「可挂题」徽标，只标出末端的学科/课程。2026-09-24 起任意层级都能
+            挂题（见 lib/subject-nodes.js），徽标会出现在每一行上，纯噪声，故去掉。 */}
         {node.is_frozen && (
           <Badge variant="destructive" className="shrink-0 text-xs">
             已冻结

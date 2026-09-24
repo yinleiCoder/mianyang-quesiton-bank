@@ -1,5 +1,6 @@
 // 科目树维护（仅系统管理员）：公共科目（discipline 单层或下挂 course）与
 // 专业目录（category → major → course）两棵树，支持增/改名/冻结/删除。
+// 任意层级的节点都能挂题（2026-09-24 起，见 lib/subject-nodes.js）。
 import { requireUser } from "@/lib/auth"
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { AccessDenied } from "@/components/access-denied"
@@ -23,8 +24,9 @@ export default async function AdminTreePage() {
         title="科目树维护"
         description={
           <>
-            公共科目树（语文、数学…直接挂题）与专业科目树（专业大类 → 专业 → 课程，课程挂题）。
-            教师只能在 <b>公共学科 / 课程</b> 节点出题；组长与专家按节点任命，覆盖后代科目。
+            公共科目树（语文、数学…）与专业科目树（专业大类 → 专业 → 课程）。
+            教师可以挂在 <b>任意层级</b> 的节点上（专业大类、专业、课程、公共学科都行）；
+            组长与专家按节点任命，覆盖后代科目。
           </>
         }
       />
