@@ -7,3 +7,51 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## 查重（2026-09-29 接入界面）
+
+引擎早就写好了（0035 的 `import_find_similar`，那个迁移自己标了「v1 未接 UI」），
+底层一应俱全：`pg_trgm`、`question_versions.search_text` + GIN 索引、
+`question_search_text()` 在建草稿/编辑/导入时都维护、`import_job_items.content_hash`
+（`md5(题干 || '|' || 答案)`）写入时算好。缺的只是把结果给到人看。
+
+### ⚠ 阈值 0.55 **不能**直接当"疑似重复"
+
+2026-09-29 拿线上 **380 道已发布题**跑了全部 **72,010 个配对**：`>0.55` 的只有 9 对，
+**其中真重复只有 2 对**（都是同题换了个空位写法：`______` vs `( )`）。
+
+其余 7 对是**同一知识点、不同侧面的辨析题**，包括刻意配成一对的：
+
+```
+0.563  在单元格中输入数字时，Excel 自动将它左对齐。
+       在单元格中输入文本时，Excel 自动将它右对齐。      ← 恰好互为反面
+0.789  …对 C3 和 D4 的行地址绝对引用，列地址相对引用
+       …对 C3 和 D4 的列地址绝对引用，行地址相对引用      ← 恰好互为反面
+```
+
+**在 0.55 上直接报「疑似重复」，会把这类题判死，还会把审核人训练成"这提示一律忽略"**
+——那比不做查重更糟。所以两处界面都**分档**，低档明确写「供参考」而不是「疑似重复」：
+
+| 档 | 阈值 | 界面措辞 |
+|---|---|---|
+| 高度相似 | ≥0.85 | 多半是同一道题换了个写法，请对照后再决定 |
+| 较相似 | ≥0.70 | 同一知识点的辨析题也会落在这一档，**不一定是重复** |
+| 供参考 | 0.55~0.70 | 这个区间大多是辨析题，是正常的 |
+
+### 三个入口，口径必须一致
+
+| 场景 | 实现 | 落点 |
+|---|---|---|
+| AI 解析导入 | `import_find_similar(p_job_id)`，**一次问整个任务**（已按相似度降序，同一 item 首条即最优） | `components/import/import-preview.jsx` |
+| 手动录入 | `find_similar_questions(p_content)`（0081 新增，不绑 job、守卫是 `is_teacher()`、题干短于 8 字直接返回空） | `components/questions/question-editor.jsx`，防抖 600ms |
+| 卷内重复 | 同页：`import-pipeline.js` 的 `dup_in_job`（**丢**掉后出现的）；跨页：预览页**客户端**算（**只标不丢**） | 各自 |
+
+改任何一个的判据之前，先看另一个——"AI 导入提示、手动录入不提示"会让人不知道该信哪个。
+
+### 两个刻意的行为
+
+- **查重失败不挡流程**：导入预览里 RPC 报错只弹一句提示；手动录入里**静默**。
+  它是辅助信息，不参与"能不能存"的判断。
+- **跨页重复不落库**：预览页客户端算的，换视图看不到。**没有**改
+  `import_save_page`（线上 5300 字的解析主链路），为一条提示改它风险不成比例。
+  代价是它只是审核时的提示——而那正是它要起作用的地方。
