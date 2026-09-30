@@ -23,7 +23,7 @@ export default function AuthLayout({ children }) {
           />
           <div className="leading-tight">
             <p className="text-base font-semibold tracking-tight">
-              绵阳市中职共建题库
+              职教高考联盟
             </p>
             <p className="text-xs text-muted-foreground">
               多校共建 · 全市共享
@@ -34,7 +34,7 @@ export default function AuthLayout({ children }) {
           {children}
         </div>
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          绵阳市教育与体育局 · 职业教育题库建设
+          职教高考联盟 · 职业教育题库建设
         </p>
       </div>
     </div>

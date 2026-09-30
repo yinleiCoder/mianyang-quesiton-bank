@@ -240,7 +240,7 @@ export function AppSidebar({
               </div>
               <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">
-                  绵阳市中职共建题库
+                  职教高考联盟
                 </span>
                 <span className="truncate text-xs">多校共建 · 全市共享</span>
               </div>

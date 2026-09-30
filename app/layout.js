@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 export const metadata = {
   // 各页只写短标题（如「工作台」），由模板补站点名
   title: {
-    default: "绵阳市中职共建题库",
-    template: "%s · 绵阳市中职共建题库",
+    default: "职教高考联盟",
+    template: "%s · 职教高考联盟",
   },
   description: "多校共建 · 全市共享的中职题库系统",
 };

@@ -23,7 +23,7 @@ export function AppBreadcrumb() {
   if (trail.length === 0) {
     return (
       <span className="truncate text-sm font-medium text-muted-foreground">
-        绵阳市中职共建题库
+        职教高考联盟
       </span>
     )
   }

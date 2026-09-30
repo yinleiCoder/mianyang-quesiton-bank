@@ -1,4 +1,4 @@
-// 题库详情：全市共享题目只读页。仅在线（live）且已入库的当前版本可看；
+// 题库详情：全省共享题目只读页。仅在线（live）且已入库的当前版本可看；
 // 草稿/审核中/已下线一律不可见（与服务端查询口径一致）。答案解析默认展开，可随时收起。
 import Link from "next/link"
 import { requireUser } from "@/lib/auth"
@@ -277,7 +277,7 @@ export default async function BankQuestionPage({ params }) {
 
       <p className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted-foreground/80">
         <SparklesIcon className="size-3.5 shrink-0" />
-        本题为全市共享题目，内容经两级审核入库后不可修改；
+        本题为全省共享题目，内容经两级审核入库后不可修改；
         {isOwner
           ? "发现错误可在「我的题目」里发起改版，"
           : "发现错误可点上方「这题有问题」反馈给作者，作者核对后会在这道题下面回复你，"}

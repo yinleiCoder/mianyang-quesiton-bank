@@ -96,7 +96,7 @@ export function SchoolsManager({ schools }) {
       <EmptyState
         icon={Building2Icon}
         title="还没有学校"
-        description="建库第一步：创建第一所学校（如 绵阳职业技术学校），教师注册时即可选择。"
+        description="建库第一步：创建第一所学校（如 XX 职业技术学校），教师注册时即可选择。"
         className="gap-4"
         action={
           <CreateDialog
@@ -224,7 +224,7 @@ function CreateDialog({ name, setName, code, setCode, creating, onSubmit, trigge
                 id="school-name"
                 required
                 maxLength={100}
-                placeholder="绵阳职业技术学校"
+                placeholder="XX 职业技术学校"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />

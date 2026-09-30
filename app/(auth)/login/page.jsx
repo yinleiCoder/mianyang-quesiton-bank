@@ -18,7 +18,7 @@ export default async function LoginPage({ searchParams }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader centered title="欢迎回来" description="登录绵阳市中职共建题库，开始出题与审核" />
+      <PageHeader centered title="欢迎回来" description="登录职教高考联盟，开始出题与审核" />
       <LoginForm next={next} />
     </div>
   )

@@ -10,7 +10,7 @@ export function PrintButton({ hint = "在打印对话框里选「另存为 PDF�
   // 打印页是独立打开的，标题补一句让打印出来的页眉/文件名带得上题目
   useEffect(() => {
     const prev = document.title
-    document.title = "题目打印 · 绵阳市中职共建题库"
+    document.title = "题目打印 · 职教高考联盟"
     return () => {
       document.title = prev
     }

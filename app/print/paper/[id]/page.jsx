@@ -43,7 +43,7 @@ export default async function PrintPaperPage({ params }) {
       <PrintButton hint="在打印对话框里选「另存为 PDF」即可保存；参考答案请用「打印答案」" />
       <PaperSheet snapshot={snapshot} mode="paper" />
       <footer className="mt-8 border-t border-black/20 pt-2 text-[10px] text-black/50">
-        绵阳市中职共建题库 · 本卷题目均取自全市共建题库，经两级审核入库
+        职教高考联盟 · 本卷题目均取自全省共建题库，经两级审核入库
       </footer>
     </div>
   )

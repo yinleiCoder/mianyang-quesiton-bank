@@ -254,7 +254,7 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
         <EmptyState
           icon={ClipboardListIcon}
           title="还没有题目"
-          description="全市共建题库靠各校教师贡献。选择科目节点，用六种题型出一题试试；提交后由你校教研组长与市级专家两级审核入库。"
+          description="全省共建题库靠各校教师贡献。选择科目节点，用六种题型出一题试试；提交后由你校教研组长与市级专家两级审核入库。"
           action={
             <Button nativeButton={false} render={<Link href="/questions/new" />}>
               <PlusIcon className="size-4" /> 出第一题

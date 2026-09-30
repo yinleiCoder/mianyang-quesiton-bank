@@ -70,7 +70,7 @@ export default async function PrintQuestionPage({ params }) {
       <PrintButton />
 
       <header className="mb-4 border-b border-black/20 pb-3">
-        <h1 className="text-lg font-semibold">绵阳市中职共建题库 · 题目打印</h1>
+        <h1 className="text-lg font-semibold">职教高考联盟 · 题目打印</h1>
         <p className="mt-1 text-xs text-black/70">
           {nodePath(q.course_node_id) || "未选节点"}
           {schoolRes.data?.name ? ` · 题源：${schoolRes.data.name}` : ""}
@@ -87,7 +87,7 @@ export default async function PrintQuestionPage({ params }) {
       <QuestionReader qtype={v.qtype} content={v.content} />
 
       <footer className="mt-6 border-t border-black/20 pt-2 text-[10px] text-black/50">
-        绵阳市中职共建题库 · 本题为全市共享题目，内容经两级审核入库
+        职教高考联盟 · 本题为全省共享题目，内容经两级审核入库
       </footer>
     </div>
   )

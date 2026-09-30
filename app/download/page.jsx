@@ -30,7 +30,7 @@ import {
 export const metadata = {
   title: "下载客户端",
   description:
-    "绵阳市中职共建题库的 Android 与 Windows 客户端：与网页端共用同一套题库和账号，随手刷题、背题、看学情。",
+    "职教高考联盟的 Android 与 Windows 客户端：与网页端共用同一套题库和账号，随手刷题、背题、看学情。",
 }
 
 const REPO = "yinleiCoder/mianyang-quiz"
@@ -114,7 +114,7 @@ export default async function DownloadPage() {
             className="size-10 shrink-0 object-contain"
           />
           <div className="leading-tight">
-            <p className="text-base font-semibold tracking-tight">绵阳市中职共建题库</p>
+            <p className="text-base font-semibold tracking-tight">职教高考联盟</p>
             <p className="text-xs text-muted-foreground">多校共建 · 全市共享</p>
           </div>
         </div>
@@ -234,7 +234,7 @@ export default async function DownloadPage() {
         </p>
 
         <p className="mt-10 text-center text-xs text-muted-foreground">
-          绵阳市教育与体育局 · 职业教育题库建设
+          职教高考联盟 · 职业教育题库建设
         </p>
       </div>
     </div>
