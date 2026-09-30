@@ -32,6 +32,7 @@ import {
   GraduationCapIcon,
   InboxIcon,
   LibraryBigIcon,
+  MapPinIcon,
   PlusIcon,
   TagsIcon,
   UsersIcon,
@@ -359,6 +360,11 @@ export default async function DashboardPage() {
           <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {ctx.isAdmin && (
               <>
+                <CardLink href="/admin/cities">
+                  <span className="flex items-center gap-2">
+                    <MapPinIcon className="size-4" /> 市管理
+                  </span>
+                </CardLink>
                 <CardLink href="/admin/schools">
                   <span className="flex items-center gap-2">
                     <Building2Icon className="size-4" /> 学校管理

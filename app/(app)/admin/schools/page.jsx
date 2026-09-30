@@ -15,16 +15,21 @@ export default async function AdminSchoolsPage() {
   }
 
   const supabase = await createClient()
-  const { data: schools, error } = await supabase.from("schools").select(SCHOOL_COLUMNS).order("name")
-  if (error) throw error
+  // 市列表一起查：建校/改市的下拉要用（含已停用的 —— 要能显示"这所学校当前挂在已停用的市上"）
+  const [schoolsRes, citiesRes] = await Promise.all([
+    supabase.from("schools").select(SCHOOL_COLUMNS).order("name"),
+    supabase.from("cities").select("id, name, is_active").order("name"),
+  ])
+  if (schoolsRes.error) throw schoolsRes.error
+  if (citiesRes.error) throw citiesRes.error
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="学校管理"
-        description="参建学校名单：注册页下拉、组长任命的学校范围都以此为据。"
+        description="参建学校名单：注册页下拉、组长任命的学校范围都以此为据。每所学校必须挂在市下面（见「市管理」）。"
       />
-      <SchoolsManager schools={schools ?? []} />
+      <SchoolsManager schools={schoolsRes.data ?? []} cities={citiesRes.data ?? []} />
     </div>
   )
 }

@@ -47,6 +47,7 @@ import {
   LibraryBigIcon,
   ListChecksIcon,
   LogOutIcon,
+  MapPinIcon,
   MessageSquareIcon,
   ScrollTextIcon,
   TagsIcon,
@@ -131,6 +132,8 @@ function useNavItems(
   if (isAdmin || isSchoolAdmin) {
     if (isAdmin) {
       admin.push(
+        // 市在学校之上：先建市，学校才挂得上（0082）
+        { title: "市管理", url: "/admin/cities", icon: MapPinIcon },
         { title: "学校管理", url: "/admin/schools", icon: Building2Icon },
         { title: "科目树维护", url: "/admin/tree", icon: GitBranchIcon },
       );
