@@ -2,7 +2,8 @@
 
 // 题目编辑器：六种题型 + 复合题（材料+子题）。内部编辑态经 lib/question-model 序列化/校验后走 RPC 落库。
 // 草稿保存需内容结构完整（DB 校验收口）；提交额外要求标签与解析，校验错误逐条 toast。
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
@@ -328,6 +329,33 @@ export function QuestionEditor({
   const [busy, setBusy] = useState("") // '' | 'save' | 'submit'
   const [warn, setWarn] = useState([])
   const revising = Boolean(reviseQuestionId)
+  // 查重：题干边写边查（防抖 600ms），**只提示、不拦保存**
+  const [similar, setSimilar] = useState([])
+
+  // 与导入侧（components/import/import-preview.jsx）用同一套判据，只是那边一次问整个任务、
+  // 这边问当前这一道。防抖是必须的：题干是逐字输入的，不防抖等于每敲一个字查一次库。
+  useEffect(() => {
+    const text = blocksToText(d.stem).trim()
+    if (text.length < 8) {
+      setSimilar([]) // 题干太短（"以下"这种）跟谁都比得像，服务端也会直接返回空
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase.rpc("find_similar_questions", {
+        p_content: { stem: d.stem },
+      })
+      // **查重失败静默**：它是辅助信息，不该在教师写题时弹错误打扰。
+      // 服务端那边同理——它不是入库校验的一环，不参与"能不能保存"的判断。
+      if (cancelled || error) return
+      setSimilar(data ?? [])
+    }, 600)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [d.stem])
 
   const set = (patch) => setD((prev) => ({ ...prev, ...patch }))
   const patchSub = (id, patch) =>
@@ -555,6 +583,33 @@ export function QuestionEditor({
               placeholder={d.qtype === "composite" ? "粘贴或编写材料、情境、图表说明…" : "输入题干…（可 Ctrl+Enter 分段）"}
               minRows={d.qtype === "composite" ? 4 : 2}
             />
+            {similar.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+                <p className="font-medium text-amber-900">
+                  题库里已有 {similar.length} 道相似的题，最像的一道 {Math.round(similar[0].similarity * 100)}%
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {similar.slice(0, 3).map((s) => (
+                    <li key={s.version_id}>
+                      <Link
+                        href={`/bank/${s.question_id}`}
+                        target="_blank"
+                        className="text-amber-800 underline-offset-2 hover:underline"
+                      >
+                        {Math.round(s.similarity * 100)}% · {s.stem}…
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {/* 这条不是客套话：拿线上 380 道题跑过，0.55~0.85 那一段**全是**辨析题
+                    （含「行地址绝对引用」vs「列地址绝对引用」这种互为反面的成对题）。
+                    不写清楚，教师会把好题删掉。 */}
+                <p className="mt-1 text-amber-700">
+                  相似不等于重复——同一知识点的辨析题（如「行地址绝对引用」与「列地址绝对引用」）
+                  也会落在这里。点开对一下再决定。
+                </p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

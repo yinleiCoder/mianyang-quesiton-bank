@@ -35,10 +35,32 @@ import {
 
 const CHUNK = 25
 
+// ---------------------------------------------------------------------------
+// 查重：三档，不是一个布尔标记
+// ---------------------------------------------------------------------------
+// 阈值 0.55 是服务端 import_find_similar 的默认值，但**直接拿它当"重复"是错的**。
+// 2026-09-29 拿线上 380 道已发布题跑了全部 72,010 个配对，>0.55 的只有 9 对，
+// 而这 9 对里**真重复只有 2 对**（都是同题换了个空位写法：`______` vs `( )`）；
+// 其余 7 对全是**"同一知识点、不同侧面"的辨析题** ——
+// 比如「行地址绝对引用、列地址相对」vs 恰好相反的那条，那是刻意配的一对。
+//
+// 所以这里分三档，**低档明确写成"供参考"而不是"疑似重复"**：
+// 把辨析题报成重复，会把这个题库最有价值的题型判死，
+// 也会把审核人训练成"这提示一律忽略"——那比不做查重更糟。
+const DUP_LEVELS = [
+  { key: "high", min: 0.85, label: "高度相似", cls: "bg-rose-100 text-rose-700" },
+  { key: "mid", min: 0.70, label: "较相似", cls: "bg-amber-100 text-amber-700" },
+  { key: "low", min: 0, label: "供参考", cls: "bg-muted text-muted-foreground" },
+]
+
+const dupLevel = (sim) => DUP_LEVELS.find((l) => sim >= l.min) ?? DUP_LEVELS[2]
+
 const FILTERS = [
   { key: "all", label: "全部", match: () => true },
   { key: "noanswer", label: "缺答案", match: (i) => needsAnswer(i) },
-  { key: "flagged", label: "有提示", match: (i) => i.flags.length > 0 },
+  { key: "flagged", label: "有提示", match: (i, ctx) => i.flags.length > 0 || ctx?.crossPageDups.has(i.id) },
+  // 只筛"值得看一眼"的两档；0.55~0.70 那一档是常态，筛出来反而干扰
+  { key: "dup", label: "疑似重复", match: (i, ctx) => (ctx?.dups.get(i.id)?.sim ?? 0) >= 0.70 },
   { key: "imported", label: "已入库", match: (i) => i.status === "imported" },
   // 「不导入」必须能筛：叉掉之后就只剩这个入口能把它们找回来
   { key: "skipped", label: "不导入", match: (i) => i.status === "skipped" },
@@ -77,6 +99,9 @@ export function ImportPreview({ job, items, onRefresh }) {
   // 看起来就是**单击没反应**；再点一下时刷新恰好回来了，才勾上。刷新本身还有 1.2s 节流
   // （import-page），被吞掉时就是一直不勾上。
   const [optimistic, setOptimistic] = useState({})
+  // 查重：item_id → { sim, stem, questionId }（只留最像的那一条）
+  const [dups, setDups] = useState(() => new Map())
+  const [dupsLoading, setDupsLoading] = useState(false)
 
   // 服务端数据追上乐观值后撤掉覆盖。不在这里主动清：刷新可能被节流延后，清早了勾选会闪回去；
   // 等 items 真的变成这个值再撤，界面才是单调的
@@ -107,7 +132,67 @@ export function ImportPreview({ job, items, onRefresh }) {
     )
   }, [items, optimistic])
 
-  const list = useMemo(() => view.filter(FILTERS.find((f) => f.key === filter).match), [view, filter])
+  const list = useMemo(
+    () => view.filter((i) => FILTERS.find((f) => f.key === filter).match(i, { dups, crossPageDups })),
+    [view, filter, dups]
+  )
+
+  // 跨页重复：同一份 PDF 里第 1 页和第 15 页出了同一道题。
+  //
+  // 同页重复在解析阶段就处理掉了（lib/import-pipeline.js 的 dup_in_job：保留先出现的、
+  // 丢掉后出现的），但那是**逐页**跑的 —— 每页一次 AI 调用、各自去重，跨页的它看不见。
+  //
+  // 为什么放在客户端而不是 import_save_page：那边是线上解析主链路（5300 字的函数），
+  // 为一条提示去改它风险不成比例；而预览页本来就拿着整个任务的全部条目，
+  // 判重所需的 key（题干前 120 字 + 答案）也已经在 import-pipeline 里定义好了。
+  // 代价：它是**审核时的提示**，不落库 —— 换个视图看不到，但那不是它的用途。
+  //
+  // 判据与 pipeline 逐字一致；比对范围是整个任务（含未勾选的），
+  // 因为"要不要保留"正是审核人要判断的事，替他把候选藏起来反而添乱。
+  const crossPageDups = useMemo(() => {
+    const seen = new Set()
+    const dupes = new Set()
+    for (const it of items) {
+      const key = `${blocksToPlain(it.content?.stem).slice(0, 120)}|${JSON.stringify(it.content?.answer ?? {})}`
+      if (seen.has(key)) dupes.add(it.id)
+      else seen.add(key)
+    }
+    return dupes
+  }, [items])
+
+  // 查重：一次问整个任务，而不是每道题问一次。
+  // 服务端按 job 返回全部命中（item × 已发布题，>0.55），已按相似度降序，
+  // 所以同一个 item 的**第一条就是最像的那条**。
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      setDupsLoading(true)
+      const supabase = createClient()
+      const { data, error } = await supabase.rpc("import_find_similar", { p_job_id: job.id })
+      if (cancelled) return
+      if (error) {
+        // 查重失败**不能挡住审核**：它只是个辅助信息，报一句就继续
+        toast.error(`查重没跑成：${error.message}`)
+        setDupsLoading(false)
+        return
+      }
+      const best = new Map()
+      for (const row of data ?? []) {
+        if (best.has(row.item_id)) continue // 已按相似度降序，首条即最优
+        best.set(row.item_id, {
+          sim: row.similarity,
+          stem: row.stem,
+          questionId: row.question_id,
+        })
+      }
+      setDups(best)
+      setDupsLoading(false)
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [job.id])
 
   // 跨页合并的结果：下一页把上一页末尾那半截并成了完整题，上一页那条残题就该丢掉。
   // 不自动写库（那样会跟教师手动的勾选打架），只把它标出来 + 在「全部保留」时跳过——
@@ -242,6 +327,18 @@ export function ImportPreview({ job, items, onRefresh }) {
         <span>
           已勾选 <b>{keptIds.length}</b> 道（共 {items.length} 道）
         </span>
+        {dupsLoading ? (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Loader2Icon className="size-3 animate-spin" />
+            正在与题库比对…
+          </span>
+        ) : (
+          dups.size > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {dups.size} 道与题库有相似题（点条目上的「查重」看详情）
+            </span>
+          )
+        )}
         <Button size="sm" onClick={importSelected} disabled={busy || keptIds.length === 0}>
           {busy ? <Loader2Icon className="size-4 animate-spin" /> : <CheckCircle2Icon className="size-4" />}
           确认入库，生成草稿
@@ -318,6 +415,30 @@ export function ImportPreview({ job, items, onRefresh }) {
                     {FLAG_LABELS[f]?.text ?? f}
                   </span>
                 ))}
+                {crossPageDups.has(it.id) && (
+                  <span
+                    title="与本任务里另一页的某道题完全一样（题干前 120 字与答案都相同）。同页重复在解析时已自动去重，跨页的只标出来——请确认要不要保留。"
+                    className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700"
+                  >
+                    跨页重复
+                  </span>
+                )}
+                {dups.get(it.id) && (
+                  <span
+                    title={
+                      `与题库中一道已发布的题相似度 ${(dups.get(it.id).sim * 100).toFixed(0)}%：\n` +
+                      `${dups.get(it.id).stem}…\n\n` +
+                      (dupLevel(dups.get(it.id).sim).key === "high"
+                        ? "高度相似 —— 多半是同一道题换了个写法，请对照后再决定是否入库。"
+                        : dupLevel(dups.get(it.id).sim).key === "mid"
+                          ? "较相似 —— 请打开对照。同一知识点的辨析题也会落在这一档，不一定是重复。"
+                          : "仅供参考 —— 这个区间大多是同知识点、不同侧面的辨析题，是正常的。")
+                    }
+                    className={`rounded px-1.5 py-0.5 ${dupLevel(dups.get(it.id).sim).cls}`}
+                  >
+                    查重 {(dups.get(it.id).sim * 100).toFixed(0)}%
+                  </span>
+                )}
                 {superseded(it) && (
                   <span
                     title={`第 ${it.page_no + 1} 页已经给出拼好的完整题：这一条是页尾的半截，不用勾选`}
