@@ -16,6 +16,7 @@ import {
   reportStateChip,
 } from "@/lib/question-reports"
 import { QuestionReader } from "@/components/bank/question-reader"
+import { ReportThread } from "@/components/questions/report-thread"
 import { PersonChip } from "@/components/bank/person-chip"
 import { QuestionReportButton } from "@/components/bank/question-report-button"
 import { AccessDenied } from "@/components/access-denied"
@@ -62,7 +63,7 @@ export default async function BankQuestionPage({ params }) {
     // 我自己在这道题上提过的反馈（RLS 只放行自己的行）。
     // 作者处理时写的那句说明会在这里显示出来 —— 这是本功能与通用意见反馈最大的不同：
     // 反馈有回复闭环，学生能看到回音。
-    loadMyQuestionReport(supabase, q.id),
+    loadMyQuestionReport(supabase, q.id, ctx.user.id),
   ])
   for (const r of [vRes, tagRes, apprRes, accuracyRes]) if (r.error) throw r.error
   const accuracy = buildAccuracyMap(accuracyRes.data).get(q.id)
@@ -198,16 +199,27 @@ export default async function BankQuestionPage({ params }) {
             </span>
           </div>
           <p className="mt-2 text-sm text-muted-foreground">{myReport.content}</p>
-          {myReport.status === "resolved" ? (
+          {myReport.status === "open" ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              还没有结论。有回应会在这里显示。
+            </p>
+          ) : myReport.status === "withdrawn" ? (
+            <p className="mt-2 text-xs text-muted-foreground">你已撤回这条反馈。</p>
+          ) : (
             <p className="mt-2 border-t pt-2 text-sm">
-              <span className="text-muted-foreground">作者回复：</span>
+              {/* 教师申诉的终态是「判定」，学生纠错是作者的「回复」—— 由状态即可分辨 */}
+              <span className="text-muted-foreground">
+                {myReport.status === "resolved" ? "作者回复：" : "判定："}
+              </span>
               {myReport.resolve_note}
             </p>
-          ) : (
-            <p className="mt-2 text-xs text-muted-foreground">
-              作者还没处理。处理后会在这里回复你。
-            </p>
           )}
+          {/* 往来消息 + 撤回（0084）。未结案才让发言/撤回。 */}
+          <ReportThread
+            reportId={myReport.id}
+            isOpen={myReport.status === "open"}
+            canWithdraw={myReport.status === "open"}
+          />
         </div>
       )}
 
@@ -232,13 +244,13 @@ export default async function BankQuestionPage({ params }) {
             </Link>
           </div>
           <ul className="mt-3 space-y-3">
-            {reports.slice(0, 5).map((r) => (
+            {reports.slice(0, 5).map((r) => {
+              const chip = reportStateChip(r.status, { questionState: q.state })
+              return (
               <li key={r.id} className="border-t pt-3 text-sm first:border-t-0 first:pt-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs ${reportStateChip(r.status).cls}`}
-                  >
-                    {reportStateChip(r.status).text}
+                  <span className={`rounded px-1.5 py-0.5 text-xs ${chip.cls}`}>
+                    {chip.text}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {reportCategoryLabel(r.category)}
@@ -265,7 +277,8 @@ export default async function BankQuestionPage({ params }) {
                   来自 {r.reporter?.name ?? "账号已注销"}
                 </p>
               </li>
-            ))}
+              )
+            })}
           </ul>
           {reports.length > 5 && (
             <p className="mt-3 border-t pt-2 text-xs text-muted-foreground">
