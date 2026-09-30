@@ -75,6 +75,8 @@ import {
 
 const SCHOOL_ADMIN_ROLE = "school_admin"
 const schoolOf = (map, id) => (id ? (map.get(id)?.name ?? null) : null)
+// 学校所属的市（0083）：市级专家的管辖范围就是这么推导出来的 —— profile → school → city
+const cityOf = (map, id) => (id ? (map.get(id)?.cities?.name ?? null) : null)
 // 本页**不含学生**：identity='student' 归「学生名册」（/students），由 lib/admin-users.js 的
 // neq("identity","student") 保证。所以这里不再有 isStudent 分支 —— 别再加回来，
 // 那会把两边的口径重新搅在一起（学生转教师后自动换边，两边互补且互斥）。
@@ -378,12 +380,15 @@ function UserRow({
             {assignments.map((a) => {
               const path = pathOf(a.node_id) || "?"
               const title = a.role === "group_leader" ? "教研组长" : "市级专家"
+              // 管辖范围：组长=任命时绑的学校；市级专家=他本人所在学校所属的市（0083 起）
+              const scope =
+                a.role === "group_leader"
+                  ? schoolOf(schoolMap, a.school_id) ?? "?"
+                  : cityOf(schoolMap, u.school_id) ?? "?"
               return (
                 <Badge key={a.id} variant="outline" className="max-w-full" title={path}>
                   <span className="truncate">
-                    {title} · {a.role === "group_leader" ? schoolOf(schoolMap, a.school_id) ?? "?" : ""}
-                    {a.role === "group_leader" ? " / " : ""}
-                    {path}
+                    {title} · {scope} / {path}
                   </span>
                 </Badge>
               )
@@ -519,6 +524,7 @@ function UserRow({
               ["手机号", u.phone ? formatPhone(u.phone) : "未绑定"],
               ["邮箱", displayEmail(u.email) || "未绑定"],
               ["学校", schoolOf(schoolMap, u.school_id) ?? "未绑定"],
+              ["所属市", cityOf(schoolMap, u.school_id) ?? "—"],
               ["身份", identityLabel(u)],
               ["注册时间", u.created_at ? fmtDateTime24(u.created_at) : "—"],
             ].map(([label, value]) => (
@@ -660,7 +666,9 @@ function UserRow({
         hint={
           picker?.role === "group_leader"
             ? `将任命「${u.name}」为 ${schoolOf(schoolMap, u.school_id) ?? ""} 的教研组长：覆盖所选节点及其后代科目的题目审核（最深处任命优先）。`
-            : `将任命「${u.name}」为市级专家：审核所选节点及其后代科目的题目（最深处任命优先）。`
+            : cityOf(schoolMap, u.school_id)
+              ? `将任命「${u.name}」为【${cityOf(schoolMap, u.school_id)}】的市级专家：只审核所选节点及其后代科目里、属于该市的题目（最深处任命优先）。他若是异地学校调过来，管辖的市会跟着学校走。`
+              : `「${u.name}」没有绑定学校，推导不出所属市 —— 任命会被拒绝。请先为他绑定学校，再来任命市级专家。`
         }
         onSelect={handleNodePick}
       />
