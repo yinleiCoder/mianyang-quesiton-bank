@@ -49,6 +49,8 @@ export function PaperAssignPanel({ versionId, sections, candidates, assignments:
   const [score, setScore] = useState("0")
   const [assignee, setAssignee] = useState(null)
   const [note, setNote] = useState("")
+  // 收回确认框受控（同片段编辑器的提交框）：动作是异步的，不控制开关就会杵着不走
+  const [revoking, setRevoking] = useState(null)
 
   async function refresh() {
     // **必须看 error**：RPC 失败时 data 是 null，静默忽略就会让列表停在旧数据上
@@ -276,10 +278,18 @@ export function PaperAssignPanel({ versionId, sections, candidates, assignments:
                       </Button>
                     )}
 
-                    <AlertDialog>
+                    <AlertDialog
+                      open={revoking === a.id}
+                      onOpenChange={(v) => !v && !busy && setRevoking(null)}
+                    >
                       <AlertDialogTrigger
                         render={
-                          <Button variant="ghost" size="sm" disabled={busy}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => setRevoking(a.id)}
+                          >
                             <UndoIcon className="size-3.5" /> 收回
                           </Button>
                         }
@@ -299,9 +309,10 @@ export function PaperAssignPanel({ versionId, sections, candidates, assignments:
                           <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
                           <AlertDialogAction
                             disabled={busy}
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.preventDefault()
-                              run("revoke_paper_assignment", { p_assignment_id: a.id }, "已收回")
+                              await run("revoke_paper_assignment", { p_assignment_id: a.id }, "已收回")
+                              setRevoking(null)
                             }}
                           >
                             {busy && <Loader2Icon className="size-4 animate-spin" />}

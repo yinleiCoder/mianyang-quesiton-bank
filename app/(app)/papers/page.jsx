@@ -6,7 +6,7 @@ import Link from "next/link"
 import { requireUser, getAuthContext } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadPaperLibrary, loadMyPapers } from "@/lib/paper-workbench"
-import { loadMyAssignments, assignmentStateChip, spanLabel } from "@/lib/paper-assignments"
+import { loadMyAssignments, loadMyTaskCount, assignmentStateChip, spanLabel } from "@/lib/paper-assignments"
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { indexNodes, isPaperNode } from "@/lib/subject-nodes"
 import { PaperCard } from "@/components/papers/paper-card"
@@ -32,7 +32,7 @@ export default async function PapersPage({ searchParams }) {
   const ctx = await getAuthContext()
   const supabase = await createClient()
 
-  const [nodes, result, myTasks] = await Promise.all([
+  const [nodes, result, myTasks, taskCount] = await Promise.all([
     loadSubjectNodes(),
     tab === "assigned"
       ? Promise.resolve({ papers: [], total: 0 })
@@ -40,6 +40,9 @@ export default async function PapersPage({ searchParams }) {
         ? loadMyPapers(supabase, { limit: 100, offset: 0 })
         : loadPaperLibrary(supabase, { node: node || null, kw: kw || null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     tab === "assigned" ? loadMyAssignments(supabase, { limit: 100 }) : Promise.resolve({ rows: [], total: 0 }),
+    // 页签上标条数：角标把人引到这一页，页签再告诉他去哪 —— 少一次「点进去发现没有」。
+    // 计数失败退回 0（与侧栏角标同一口径：装饰性信息不阻断页面）
+    ctx.isTeacher ? loadMyTaskCount(supabase).catch(() => 0) : Promise.resolve(0),
   ])
   const { byId: nodeMap } = indexNodes(nodes)
   const papers = result.papers ?? []
@@ -89,7 +92,7 @@ export default async function PapersPage({ searchParams }) {
               href={qs({ tab: "assigned", page: "" })}
               className={`rounded-md px-3 py-1.5 ${tab === "assigned" ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
             >
-              我参与的
+              我参与的{taskCount > 0 ? ` · ${taskCount}` : ""}
             </Link>
           )}
         </div>

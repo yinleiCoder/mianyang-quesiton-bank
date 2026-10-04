@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server"
 import { loadSchools, schoolNameOf } from "@/lib/reference-data"
 import { loadOpenFeedbackCount } from "@/lib/feedback"
 import { loadOpenReportCount } from "@/lib/question-reports"
+import { loadMyTaskCount } from "@/lib/paper-assignments"
 import { AppBreadcrumb } from "@/components/app-breadcrumb"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -103,6 +104,18 @@ async function AppSidebarData() {
     }
   }
 
+  // 子卷任务角标（0085 协同组卷）：**被指派人的通知面** —— 别人把一段子卷分给你，
+  // 你不去「我参与的」翻就看不见。与题目反馈同一档判断（受众是普通教师），
+  // 失败退回 0：角标是装饰性的，不该让所有页面跟着进错误边界。
+  let openPaperTasks = 0
+  if (ctx.isTeacher || ctx.isSchoolAdmin || ctx.isAdmin) {
+    try {
+      openPaperTasks = await loadMyTaskCount(await createClient())
+    } catch {
+      openPaperTasks = 0
+    }
+  }
+
   return (
     <AppSidebar
       user={{
@@ -119,6 +132,7 @@ async function AppSidebarData() {
       openFeedback={openFeedback}
       openReviews={openReviews}
       openReports={openReports}
+      openPaperTasks={openPaperTasks}
     />
   )
 }

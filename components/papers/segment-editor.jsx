@@ -37,6 +37,9 @@ export function SegmentEditor({ assignment, section, slots: initial, existingIds
   const [token, setToken] = useState(assignment.updated_us)
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // 提交确认框**要受控**：动作是异步的（先静默保存再提交），不控制开关的话
+  // AlertDialogAction 里的 preventDefault 会让它提交完还杵在屏幕上。
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const locked = assignment.state === "submitted" || assignment.state === "locked"
   const chip = assignmentStateChip(assignment.state)
 
@@ -120,6 +123,7 @@ export function SegmentEditor({ assignment, section, slots: initial, existingIds
       p_assignment_id: assignment.id,
     })
     setBusy(false)
+    setConfirmOpen(false)
     if (error) {
       toast.error(error.message)
       return
@@ -129,6 +133,12 @@ export function SegmentEditor({ assignment, section, slots: initial, existingIds
   }
 
   const picked = slots.filter((s) => s.item).length
+  // 选题器的"已在卷内"要**带上刚挑的**：只给服务端快照那一份的话，同一道题能点两次，
+  // 保存时撞 (paper_version_id, question_id) 唯一索引才报错（真机上撞过一次）。
+  const usedIds = new Set([
+    ...existingIds,
+    ...slots.filter((s) => s.item).map((s) => s.item.question_id),
+  ])
 
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -147,7 +157,7 @@ export function SegmentEditor({ assignment, section, slots: initial, existingIds
               targetSectionKey={String(section.sort_order)}
               onTargetSectionChange={() => {}}
               onAdd={addFromBank}
-              existingIds={existingIds}
+              existingIds={usedIds}
             />
           )}
         </div>
@@ -234,7 +244,7 @@ export function SegmentEditor({ assignment, section, slots: initial, existingIds
             {busy && <Loader2Icon className="size-4 animate-spin" />}
             保存这一段
           </Button>
-          <AlertDialog>
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
             <AlertDialogTrigger
               render={
                 <Button variant="outline" disabled={locked || busy || picked === 0}>

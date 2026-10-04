@@ -67,6 +67,7 @@ function useNavItems(
   openFeedback = 0,
   openReviews = 0,
   openReports = 0,
+  openPaperTasks = 0,
 ) {
   // 主菜单随里程碑追加：M4 审批收件箱（组长/专家/管理员见）、M5 全市题库
   // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
@@ -93,8 +94,10 @@ function useNavItems(
         ]
       : []),
     { title: "题库", url: "/bank", icon: LibraryBigIcon },
-    // 组卷库对所有登录用户可见（与题库同口径：已入库试卷全市共享，学生也能看）
-    { title: "组卷库", url: "/papers", icon: FileStackIcon },
+    // 组卷库对所有登录用户可见（与题库同口径：已入库试卷全市共享，学生也能看）。
+    // 角标 = 别人分给我的子卷任务（0085 协同组卷）——**这是被指派人唯一会主动看到的通知**，
+    // 没有它就得自己去「我参与的」翻。点进组卷库后第一个页签就是它。
+    { title: "组卷库", url: "/papers", icon: FileStackIcon, badge: openPaperTasks },
     // 复习资料：全市共享，所有登录用户都能看；上传/删除按钮由页面按角色与归属画。
     // 形状与题库一致 —— 内容型入口，不做角色分叉。
     { title: "复习资料", url: "/materials", icon: FolderDownIcon },
@@ -200,6 +203,7 @@ export function AppSidebar({
   openFeedback = 0,
   openReviews = 0,
   openReports = 0,
+  openPaperTasks = 0,
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
@@ -212,6 +216,7 @@ export function AppSidebar({
     openFeedback,
     openReviews,
     openReports,
+    openPaperTasks,
   );
 
   // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）——文案见 lib/roles.js
