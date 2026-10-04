@@ -16,7 +16,7 @@ import { PaperInsightLinks } from "@/components/papers/paper-insight-links"
 import { AccessDenied } from "@/components/access-denied"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { PrinterIcon, FileCheckIcon, ArrowLeftIcon, AlertTriangleIcon, ClipboardCheckIcon } from "lucide-react"
+import { PrinterIcon, FileCheckIcon, ArrowLeftIcon, AlertTriangleIcon, ClipboardCheckIcon, UsersIcon } from "lucide-react"
 
 export async function generateMetadata({ params }) {
   const { id } = await params
@@ -115,6 +115,13 @@ export default async function PaperDetailPage({ params }) {
             published={snapshot.status === "published"}
             canLecture={ctx.isTeacher || ctx.isSchoolAdmin || ctx.isAdmin}
           />
+          {/* 协作分派（0085）：只有创始人在草稿/退回状态下用得上 ——
+              分派挂在在编辑的那一版上，且服务端那几个 RPC 也只认创始人。 */}
+          {isOwner && (snapshot.status === "draft" || snapshot.status === "returned") && (
+            <Button variant="outline" nativeButton={false} render={<Link href={`/papers/${paper.id}/assign`} />}>
+              <UsersIcon className="size-4" /> 协作分派
+            </Button>
+          )}
           {/* 阅卷入口只给有权限的人（试卷作者/本校管理员/系统管理员）。
               真正的权限判断在 RPC 里，这里只是不给一个点了会被拒的入口 */}
           {snapshot.status === "published" && (isOwner || ctx.isSchoolAdmin || ctx.isAdmin) && (
