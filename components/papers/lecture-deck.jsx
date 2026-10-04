@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react"
 import { QuestionView } from "@/components/questions/question-view"
 import { qtypeLabel } from "@/lib/question-model"
 import { percentText } from "@/lib/analytics"
+import { isHighError } from "@/lib/accuracy"
 import { Button } from "@/components/ui/button"
 import {
   ArrowLeftIcon,
@@ -229,7 +230,15 @@ function QuestionSlide({ slide, reveal }) {
 
       <aside className="space-y-5">
         <div className="rounded-xl border border-slate-700 p-4">
-          <p className="text-sm text-slate-400">正确率</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-slate-400">正确率</p>
+            {/* 卷内口径的易错标识：样本取判过分的人数，与「试题分析」页同一条线 */}
+            {isHighError(1 - Number(rate), stat.graded) && (
+              <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs font-medium text-rose-300">
+                易错
+              </span>
+            )}
+          </div>
           <p
             className={`text-5xl font-semibold tabular-nums ${
               rate == null ? "text-slate-400" : rate <= 0.4 ? "text-rose-400" : "text-emerald-400"
@@ -240,6 +249,7 @@ function QuestionSlide({ slide, reveal }) {
           </p>
           <p className="mt-1 text-sm text-slate-400 tabular-nums">
             {stat.correct ?? 0} / {stat.graded ?? 0} 人答对
+            {Number(stat.wrong_total) > 0 && ` · 错 ${stat.wrong_total} 人次`}
             {Number(stat.blank) > 0 && ` · ${stat.blank} 人未答`}
             {Number(stat.pending) > 0 && ` · ${stat.pending} 人待阅卷`}
           </p>

@@ -8,7 +8,14 @@ import { indexNodes } from "@/lib/subject-nodes"
 import { loadSchools, loadSubjectNodes, schoolNameOf } from "@/lib/reference-data"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
-import { buildAccuracyMap, errorRatePercent, HIGH_ERROR_RATE } from "@/lib/accuracy"
+import {
+  accuracyWrongCount,
+  buildAccuracyMap,
+  errorRatePercent,
+  isEasilyWrong,
+  MIN_ATTEMPTS_HIGH_ERROR,
+} from "@/lib/accuracy"
+import { EasilyWrongBadge } from "@/components/analytics/easily-wrong-badge"
 import {
   loadQuestionReports,
   loadMyQuestionReport,
@@ -137,20 +144,28 @@ export default async function BankQuestionPage({ params }) {
           <span className="text-sm text-muted-foreground">难度 {difficultyLabel(v.difficulty)}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">v{v.version_no}</span>
           {/* 全站作答错误率。无作答记录时整段不渲染 —— 详情页留白比摆一个可能是 0% 的占位干净。
-              口径是"客观题的全站累计"（question_accuracy 只统计 grading='auto'），跨版本累计。 */}
+              口径是"客观题的全站累计"（question_accuracy 只统计 grading='auto'），跨版本累计。
+              「易错」与标红同判据（错误率 ≥60% 且 ≥5 次作答），见 lib/accuracy.js。 */}
           {accuracy && (
-            <span
-              className={
-                "text-sm " +
-                (accuracy.errorRate >= HIGH_ERROR_RATE
-                  ? "font-medium text-rose-700 dark:text-rose-400"
-                  : "text-muted-foreground")
-              }
-              title={`全站共 ${accuracy.attempts} 次作答，答对 ${accuracy.correct} 次（不含主观自评题）`}
-            >
-              错误率 {errorRatePercent(accuracy)}
-              <span className="ml-1 text-xs text-muted-foreground/70">({accuracy.attempts} 次作答)</span>
-            </span>
+            <>
+              {isEasilyWrong(accuracy) && (
+                <EasilyWrongBadge className="px-2 py-0.5" title={`错误率 ≥60% 且至少 ${MIN_ATTEMPTS_HIGH_ERROR} 次作答`} />
+              )}
+              <span
+                className={
+                  "text-sm " +
+                  (isEasilyWrong(accuracy)
+                    ? "font-medium text-rose-700 dark:text-rose-400"
+                    : "text-muted-foreground")
+                }
+                title={`全站共 ${accuracy.attempts} 次作答，答对 ${accuracy.correct} 次（不含主观自评题）`}
+              >
+                错误率 {errorRatePercent(accuracy)}
+                <span className="ml-1 text-xs text-muted-foreground/70">
+                  （{accuracy.attempts} 次作答，错 {accuracyWrongCount(accuracy)} 次）
+                </span>
+              </span>
+            </>
           )}
           {v.change_type === "edit" && (
             <span className="text-xs text-muted-foreground">改版后的最新入库版本</span>

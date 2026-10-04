@@ -8,7 +8,14 @@ import { contentSummary, qtypeLabel, difficultyLabel } from "@/lib/question-mode
 import { indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
 import { loadSchools, loadSubjectNodes, loadTags } from "@/lib/reference-data"
 import { bankQueryString, hasBankFilters, parseBankFilters } from "@/lib/bank-query"
-import { buildAccuracyMap, errorRatePercent, HIGH_ERROR_RATE } from "@/lib/accuracy"
+import {
+  accuracyWrongCount,
+  buildAccuracyMap,
+  errorRatePercent,
+  isEasilyWrong,
+  MIN_ATTEMPTS_HIGH_ERROR,
+} from "@/lib/accuracy"
+import { EasilyWrongBadge } from "@/components/analytics/easily-wrong-badge"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
 import { PersonChip } from "@/components/bank/person-chip"
@@ -220,18 +227,28 @@ export default async function BankPage({ searchParams }) {
                   {r.qtypeLabel}
                 </Badge>
                 <span>难度 {r.difficultyLabel}</span>
-                {/* 错误率来自全站作答记录；没人做过时明确说"没有数据"，不能显示成 0%（会被读成"大家都做对了"） */}
+                {/* 错误率来自全站作答记录；没人做过时明确说"没有数据"，不能显示成 0%（会被读成"大家都做对了"）。
+                    「易错」= 错误率 ≥60% **且 ≥5 次作答**（lib/accuracy.js 的 isEasilyWrong）——
+                    标红与徽章走同一条判据，否则会出现"数字标红但没有易错字样"的错位。 */}
                 {r.accuracy ? (
-                  <Badge
-                    variant="secondary"
-                    className={
-                      "px-1.5 py-0 text-xs" +
-                      (r.accuracy.errorRate >= HIGH_ERROR_RATE ? " bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" : "")
-                    }
-                    title={`全站共 ${r.accuracy.attempts} 次作答，答对 ${r.accuracy.correct} 次`}
-                  >
-                    错误率 {errorRatePercent(r.accuracy)}
-                  </Badge>
+                  <>
+                    {isEasilyWrong(r.accuracy) && (
+                      <EasilyWrongBadge title={`错误率 ≥60% 且至少 ${MIN_ATTEMPTS_HIGH_ERROR} 次作答`} />
+                    )}
+                    <Badge
+                      variant="secondary"
+                      className={
+                        "px-1.5 py-0 text-xs" +
+                        (isEasilyWrong(r.accuracy) ? " bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" : "")
+                      }
+                      title={`全站共 ${r.accuracy.attempts} 次作答，答对 ${r.accuracy.correct} 次`}
+                    >
+                      错误率 {errorRatePercent(r.accuracy)}
+                    </Badge>
+                    <span className="text-muted-foreground/70">
+                      错 {accuracyWrongCount(r.accuracy)} 次
+                    </span>
+                  </>
                 ) : (
                   <span className="text-muted-foreground/70">暂无作答数据</span>
                 )}

@@ -1,13 +1,18 @@
 import { accuracyClass, OptionDistribution } from "@/components/analytics/option-distribution"
+import { EasilyWrongBadge } from "@/components/analytics/easily-wrong-badge"
 import { percentText } from "@/lib/analytics"
+import { isHighError, MIN_ATTEMPTS_HIGH_ERROR } from "@/lib/accuracy"
 
 // 逐题分析：默认折叠，点开看选项分布与错答名单。
 //
 // 用原生 <details> 而不是自己的折叠组件：一页可能有几十道题，
 // 用 HTML 自带的能力就不必为此引入客户端 JS（这一页因此仍是不含 "use client" 的服务端组件）。
 //
-// 每题一行摘要（题号 / 题型 / 正确率 / 作答人数）＋ 展开后的细节：
+// 每题一行摘要（题号 / 题型 / 正确率 / 作答人数 / 错答人数 / 易错标识）＋ 展开后的细节：
 // 选项分布（含"谁选了它"）、填空题的答案频次、错答名单。
+//
+// **这里用的是卷内口径**（本场/本班考这份卷子的人），不是题库那条全站口径：
+// 样本量取 `graded`（判过分的人数），少于 MIN_ATTEMPTS_HIGH_ERROR 不标易错。
 export function QuestionStatsList({ items, studentLimit }) {
   if (!items?.length) {
     return (
@@ -19,7 +24,11 @@ export function QuestionStatsList({ items, studentLimit }) {
 
   return (
     <ul className="space-y-2">
-      {items.map((item) => (
+      {items.map((item) => {
+        // 卷内口径的易错判定：错误率 = 1 - 正确率，样本 = 判过分的人数
+        const easilyWrong =
+          item.correct_rate != null && isHighError(1 - Number(item.correct_rate), item.graded)
+        return (
         <li key={item.item_id} className="rounded-xl border">
           <details className="group">
             <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm marker:content-none">
@@ -29,10 +38,20 @@ export function QuestionStatsList({ items, studentLimit }) {
                 {Number(item.total)}
                 {Number(item.blank) > 0 ? ` · 未答 ${item.blank}` : ""}
               </span>
+              {easilyWrong && (
+                <EasilyWrongBadge
+                  title={`本卷错误率 ≥60% 且至少 ${MIN_ATTEMPTS_HIGH_ERROR} 人判过分`}
+                />
+              )}
               {/* 0 次作答（还没人判到这道题）显示「—」而不是 0%——同 lib/accuracy.js 的规矩 */}
               <span className={`ml-auto tabular-nums font-medium ${accuracyClass(item.correct_rate)}`}>
                 正确率 {percentText(item.correct_rate)}
               </span>
+              {Number(item.wrong_total) > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  错 {item.wrong_total} 人次
+                </span>
+              )}
               {Number(item.pending) > 0 && (
                 <span className="text-xs text-amber-600">待阅卷 {item.pending}</span>
               )}
@@ -80,7 +99,8 @@ export function QuestionStatsList({ items, studentLimit }) {
             </div>
           </details>
         </li>
-      ))}
+        )
+      })}
     </ul>
   )
 }
