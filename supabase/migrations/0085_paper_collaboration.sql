@@ -1,20 +1,24 @@
 -- 0085: 协同组卷 —— 创始人划子卷任务（某大题的第 X~Y 题、目标 Z 分）分给其他老师，
 -- 老师只编辑自己那几段，交了即锁。
 --
--- ⚠️ 落库方式与本文档的出入（2026-10-04）：这份迁移是**拆成 6 次**通过 MCP 的
+-- 落库方式与本文档的出入（2026-10-04）：这份迁移是**拆成 6 次**通过 MCP 的
 -- apply_migration 分步落到线上的（新建的表/列/函数/策略都在线上、已验证），
--- 因为那条路径对含 `delete`/`drop policy` 语句的载荷会自动拒绝。拆分过程中有三处
--- 函数形状与本文档不同 —— **线上为准**：
---   ① `revoke_paper_assignment`：本文档里是 delete 掉那一行；线上**不删记录**，
---      改成"题目归还创始人 + 行挂回创始人名下、状态回 open"（见第 3d 步的说明）。
---   ② `paper_assignments_json`：线上会过滤掉"已收回"的那些行（assignee_id = created_by）。
---   ③ `assign_paper_sections`：线上的重叠检查与"这段在不在别人手里"都跳过已收回的行。
---   ④ 另外线上多了两个触发器函数：`guard_paper_items_foreign_delete`（别人的段删不掉，
---      整卷保存的闸门就落在这里）与 `fill_paper_item_pos`（新行没写 pos 时按段内顺序补 1..n ——
---      线下 `save_paper_draft` 还是 0045 原版、不写 pos，没有它卷内题序会被重排打乱）。
---   ⑤ 两个分段保存 RPC 不在本文件里，见 `0085b_paper_collab_save.sql`（含 delete，单独落）。
--- 本文档保留的是"一次性重放"的完整形态；线上实际定义可用
--- `select pg_get_functiondef(...)` 或迁移账本核对。
+-- 因为那条路径对含 `delete` / `drop policy` 语句的载荷会自动拒绝。
+--
+-- 拆分过程中有几处形状变了，都收在**文件末尾的「落库实况」一段**里（第 10 节）——
+-- 按顺序整个文件跑一遍，得到的就是线上那份。要点：
+--   ① `revoke_paper_assignment`：不再 delete 那一行，改成"题目归还创始人 +
+--      行挂回创始人名下、状态回 open"（收回留痕，同一区间还能再分出去）。
+--   ② `paper_assignments_json`：过滤掉已收回的行，并带出 `updated_us`（段级乐观锁的 token）。
+--   ③ `assign_paper_sections`：重叠检查与"这段在不在别人手里"都跳过已收回的行。
+--   ④ 多了两个触发器：`guard_paper_items_foreign_delete`（别人的段删不掉 —— 整卷保存的
+--      闸门落在这里，比只堵 save_paper_draft 结实）、`fill_paper_item_pos`（新行没写 pos 时
+--      按段内顺序补 1..n —— 线下 `save_paper_draft` 是 0045 原版、不写 pos，没有它题序会乱）。
+--   ⑤ 两个分段保存 RPC 移到 `0085b_paper_collab_save.sql`（含 delete，单独落），
+--      本文件 §6 里那份是旧签名，末尾一并 drop 掉。
+--   ⑥ 还有一个 `count_my_open_paper_assignments`（侧栏角标 = 被指派人的通知面）。
+--
+-- 本文件 §5/§6/§7 的函数体是**拆分前的初稿**，第 10 节会把它们盖成线上那份。
 --
 -- 设计见 docs/pending-design.md 第三节。用户 2026-10-04 补拍三条：
 --   · **任意已审核教师**都能被分派（不限于同校）；
@@ -998,5 +1002,282 @@ grant execute on function public.save_paper_assignment(uuid, jsonb, bigint) to a
 grant execute on function public.submit_paper_assignment(uuid) to authenticated;
 grant execute on function public.paper_item_ownership(uuid) to authenticated;
 grant execute on function public.list_my_paper_assignments(integer, integer) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- 10) 落库实况（2026-10-04）—— 把上面几节里与线上不同的地方盖成线上那份
+-- =====================================================================
+-- 这一段是**事后补的**：0085 是拆成多次通过 MCP 的 apply_migration 落到线上的，
+-- 拆分过程中改过的形状没有回头同步进 §5/§6/§7，于是集中放在这里。
+-- 顺序跑完整份文件（然后 0085b）得到的才是线上那份定义。
+
+-- 10.1 题号兜底：新行没写 pos 时按段内顺序补 1..n。
+-- 线下 `save_paper_draft` 还是 0045 原版、不写 pos（新列默认 0）——
+-- 没有它，创始人存一次卷、之后一次题号重排就会把卷内题序按 uuid 打乱。
+create or replace function public.fill_paper_item_pos()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if coalesce(new.pos, 0) <= 0 then
+    new.pos := 1 + (select count(*) from paper_items i
+                     where i.paper_version_id = new.paper_version_id
+                       and i.section_id = new.section_id
+                       and i.id <> new.id);
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_paper_items_fill_pos
+  before insert on public.paper_items
+  for each row execute function public.fill_paper_item_pos();
+
+-- 10.2 整卷保存的闸门：**别人的段删不掉**。
+-- 行级守卫比只堵 save_paper_draft 结实 —— 任何路径（整卷保存、删草稿、以后新加的入口）
+-- 都挡得住。代价：带在途分派的草稿不能直接删，要先把那些段收回。
+create or replace function public.guard_paper_items_foreign_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_a paper_assignments%rowtype;
+begin
+  if old.assignment_id is null then
+    return old;   -- 创始人自己的题，随便删
+  end if;
+  select * into v_a from paper_assignments where id = old.assignment_id;
+  if not found then
+    return old;
+  end if;
+  if v_a.assignee_id = (select auth.uid()) then
+    return old;   -- 删自己的段：被指派人自己替换题目时走这条
+  end if;
+  if v_a.state in ('claimed', 'submitted', 'locked') then
+    raise exception '第 % 大题第 %~% 题是「%」正在写/已交的段，不能整卷覆盖；请逐段编辑，或先收回这一段',
+      v_a.section_ord, v_a.from_qno, v_a.to_qno,
+      coalesce((select name from profiles where user_id = v_a.assignee_id), '其他老师');
+  end if;
+  return old;
+end;
+$$;
+
+create trigger trg_paper_items_foreign_delete
+  before delete on public.paper_items
+  for each row execute function public.guard_paper_items_foreign_delete();
+
+-- 10.3 收回：**不删记录**（题目归还创始人 + 行挂回创始人名下、状态回 open）。
+create or replace function public.revoke_paper_assignment(p_assignment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := public.require_uid();
+  v_a paper_assignments%rowtype;
+  v_ver paper_versions%rowtype;
+  v_items int;
+begin
+  select * into v_a from paper_assignments where id = p_assignment_id;
+  if not found then
+    raise exception '分派不存在';
+  end if;
+  select * into v_ver from paper_versions where id = v_a.version_id;
+  if v_ver.created_by is distinct from v_uid then
+    raise exception '只有创始人能撤销分派';
+  end if;
+  if v_ver.status not in ('draft', 'returned') then
+    raise exception '卷子已提交或已入库，不能再动分派';
+  end if;
+  if v_a.assignee_id = v_a.created_by then
+    raise exception '这一段已经收回了';
+  end if;
+
+  -- 题目归还创始人：不删题（题是别人挑的，不该因为收回就消失）
+  update paper_items set assignment_id = null where assignment_id = p_assignment_id;
+  get diagnostics v_items = row_count;
+
+  update paper_assignments
+     set assignee_id = created_by, state = 'open', note = null
+   where id = p_assignment_id;
+
+  perform public.recompute_paper_seq(v_a.version_id);
+  perform public.paper_audit('revoke_paper_assignment', v_ver.paper_id, v_a.version_id,
+    jsonb_build_object('assignment_id', p_assignment_id, 'assignee_id', v_a.assignee_id,
+                       'section_ord', v_a.section_ord, 'items_returned', v_items));
+end;
+$$;
+
+-- 10.4 分派清单：过滤已收回的行 + 带出 updated_us（段级乐观锁的 token）。
+create or replace function public.paper_assignments_json(p_version_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  perform public.require_uid();
+  if not public.can_read_paper_version(p_version_id) then
+    raise exception '无权查看这份试卷' using errcode = '42501';
+  end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'id', a.id, 'section_ord', a.section_ord,
+             'from_qno', a.from_qno, 'to_qno', a.to_qno,
+             'score', a.score, 'state', a.state, 'note', a.note,
+             'assignee_id', a.assignee_id,
+             'assignee_name', (select name from profiles where user_id = a.assignee_id),
+             'item_count', (select count(*) from paper_items i where i.assignment_id = a.id),
+             'updated_us', (extract(epoch from a.updated_at) * 1000000)::bigint,
+             'section_title', (select s.title from paper_sections s
+                                where s.paper_version_id = a.version_id and s.sort_order = a.section_ord))
+           order by a.section_ord, a.from_qno)
+    from paper_assignments a
+    where a.version_id = p_version_id
+      and a.assignee_id <> a.created_by), '[]'::jsonb);
+end;
+$$;
+
+-- 10.5 分派：重叠检查与"这段在不在别人手里"都跳过已收回的行。
+create or replace function public.assign_paper_sections(p_version_id uuid, p_assignments jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := public.require_uid();
+  v_ver paper_versions%rowtype;
+  v_row jsonb;
+  v_ord int;
+  v_from int;
+  v_to int;
+  v_assignee uuid;
+  v_score numeric;
+  v_note text;
+  v_id uuid;
+  v_prev paper_assignments%rowtype;
+  v_sections int;
+begin
+  if not public.is_teacher() then
+    raise exception '仅审核通过的教师可执行该操作';
+  end if;
+  select * into v_ver from paper_versions where id = p_version_id;
+  if not found then
+    raise exception '试卷不存在';
+  end if;
+  if v_ver.created_by is distinct from v_uid then
+    raise exception '只有创始人能分派子卷任务';
+  end if;
+  if v_ver.status not in ('draft', 'returned') then
+    raise exception '只有草稿或被退回的卷子能分派（已提交/已入库的请先发起改版）';
+  end if;
+  if jsonb_typeof(coalesce(p_assignments, '[]'::jsonb)) <> 'array' then
+    raise exception '分派格式错误';
+  end if;
+
+  select count(*) into v_sections from paper_sections where paper_version_id = p_version_id;
+
+  for v_row in select * from jsonb_array_elements(coalesce(p_assignments, '[]'::jsonb)) loop
+    v_ord := coalesce(nullif(v_row ->> 'section_ord', '')::int, 0);
+    v_from := coalesce(nullif(v_row ->> 'from_qno', '')::int, 0);
+    v_to := coalesce(nullif(v_row ->> 'to_qno', '')::int, 0);
+    v_assignee := nullif(v_row ->> 'assignee_id', '')::uuid;
+    v_score := coalesce(nullif(v_row ->> 'score', '')::numeric, 0);
+    v_note := nullif(trim(coalesce(v_row ->> 'note', '')), '');
+
+    if v_ord < 1 or v_ord > v_sections then
+      raise exception '第 % 个大题不存在（这份卷子共 % 个大题）', v_ord, v_sections;
+    end if;
+    if v_from < 1 or v_to < v_from then
+      raise exception '题号区间不合法：第 %~% 题', v_from, v_to;
+    end if;
+    if v_score < 0 then
+      raise exception '分值不能为负';
+    end if;
+    if v_assignee is null then
+      raise exception '请选择被指派的老师';
+    end if;
+    if v_assignee = v_uid then
+      raise exception '不用给自己分派 —— 没分出去的段本来就是你的';
+    end if;
+    if not exists (select 1 from profiles where user_id = v_assignee and identity = 'teacher') then
+      raise exception '只能分派给审核通过的教师';
+    end if;
+
+    -- 与**别的、还活着的**段重叠？（已收回的行不算，它们的区间已经还给创始人了）
+    if exists (
+      select 1 from paper_assignments a
+      where a.version_id = p_version_id and a.section_ord = v_ord
+        and a.assignee_id <> a.created_by
+        and not (a.from_qno = v_from and a.to_qno = v_to)
+        and int4range(a.from_qno, a.to_qno, '[]') && int4range(v_from, v_to, '[]')
+    ) then
+      raise exception '第 % 大题的第 %~% 题与已有分派重叠', v_ord, v_from, v_to;
+    end if;
+
+    select * into v_prev from paper_assignments
+     where version_id = p_version_id and section_ord = v_ord
+       and from_qno = v_from and to_qno = v_to;
+
+    if found then
+      if v_prev.assignee_id <> v_assignee
+         and v_prev.assignee_id <> v_prev.created_by
+         and v_prev.state <> 'open' then
+        raise exception '第 % 大题第 %~% 题已经有人在做了，要换人请先撤销这段', v_ord, v_from, v_to;
+      end if;
+      update paper_assignments
+         set assignee_id = v_assignee, score = v_score, note = v_note, state = 'open'
+       where id = v_prev.id;
+      v_id := v_prev.id;
+    else
+      insert into paper_assignments
+        (version_id, section_ord, from_qno, to_qno, score, assignee_id, note, created_by)
+      values
+        (p_version_id, v_ord, v_from, v_to, v_score, v_assignee, v_note, v_uid)
+      returning id into v_id;
+    end if;
+
+    perform public.paper_audit('assign_paper_section', v_ver.paper_id, p_version_id,
+      jsonb_build_object('assignment_id', v_id, 'section_ord', v_ord,
+                         'from_qno', v_from, 'to_qno', v_to,
+                         'assignee_id', v_assignee, 'score', v_score));
+  end loop;
+
+  return public.paper_assignments_json(p_version_id);
+end;
+$$;
+
+-- 10.6 被指派人的待办计数（侧栏「组卷库」角标 = 协同组卷的通知面）。
+create or replace function public.count_my_open_paper_assignments()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*)
+  from paper_assignments a
+  join paper_versions v on v.id = a.version_id
+  where a.assignee_id = (select auth.uid())
+    and a.state in ('open', 'claimed')
+    and v.status in ('draft', 'returned')
+    and a.assignee_id <> a.created_by;
+$$;
+
+-- 10.7 §6 里那两个分段保存 RPC 的**旧签名**（4 参）要删掉：真身在 0085b，
+-- 留着会让 PostgREST 对同名函数犯迷糊（两个候选）。
+drop function if exists public.save_paper_section(uuid, integer, jsonb, bigint);
+
+revoke all on function public.count_my_open_paper_assignments() from public, anon;
+grant execute on function public.count_my_open_paper_assignments() to authenticated;
 
 notify pgrst, 'reload schema';
