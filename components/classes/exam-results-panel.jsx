@@ -3,6 +3,7 @@ import { fmtDateTime24 } from "@/lib/format"
 import { percentText } from "@/lib/analytics"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScoreDistribution } from "@/components/classes/score-distribution"
+import { Reveal } from "@/components/ui/reveal"
 
 // 考试结果：这个班考过的每份卷——谁最高、谁最低、谁进步最大、分数怎么分布（0087）。
 //
@@ -35,11 +36,11 @@ export function ExamResultsPanel({ results, classId }) {
           ——每份卷都会带上「看成绩榜 / 讲评 / AI 分析」的入口。
         </p>
       ) : (
-        <div className="space-y-3">
+        <Reveal className="space-y-3" stagger={0.06}>
           {papers.map((p) => (
             <PaperCard key={p.paper_id} paper={p} classId={classId} studentCount={studentCount} />
           ))}
-        </div>
+        </Reveal>
       )}
 
       {results?.truncated && (

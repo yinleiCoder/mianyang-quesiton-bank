@@ -1,5 +1,6 @@
 import { arr } from "@/lib/ai-report-prompt"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Reveal } from "@/components/ui/reveal"
 
 // 渲染一份 AI 报告（0088 存下来的结构化 json）。
 //
@@ -20,7 +21,7 @@ export function AiReportView({ report }) {
   ].filter((r) => r.items.length > 0)
 
   return (
-    <div className="space-y-4">
+    <Reveal className="space-y-4" stagger={0.05}>
       {c.overview && (
         <Card>
           <CardHeader className="pb-2">
@@ -122,7 +123,7 @@ export function AiReportView({ report }) {
       {c.caveats && (
         <p className="text-xs text-muted-foreground">数据说明：{String(c.caveats)}</p>
       )}
-    </div>
+    </Reveal>
   )
 }
 
