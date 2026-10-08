@@ -9,6 +9,7 @@
     "test:import": "node --import ./scripts/alias-loader.mjs scripts/test-import-pipeline.mjs",
     "test:docx": "node --import ./scripts/alias-loader.mjs scripts/test-docx-window.mjs",
     "test:retry": "node --import ./scripts/alias-loader.mjs scripts/test-supabase-retry.mjs",
+    "test:ai-report": "node scripts/test-ai-report.mjs",
     "test:phone": "node scripts/test-phone.mjs"
   },
   "dependencies": {

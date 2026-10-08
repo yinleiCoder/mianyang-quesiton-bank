@@ -13,6 +13,12 @@
 //   node scripts/e2e-cdp.mjs shot   /tmp/step1.png
 //
 // 前置：Chrome 需以 --remote-debugging-port=9222 启动（见 scripts/e2e-chrome.ps1）。
+//
+// ⚠ **删除任何文件之前必须先问用户**（2026-10-08 用户明确要求）。
+//   这条写在这里是因为最容易踩的场景就在本脚本旁边：为了看一眼组件的渲染效果，会临时加一个
+//   `app/dev-*/page.jsx` 的 fixture 路由，验完顺手就删。**别顺手**：先问，再删；
+//   不删也不影响（那些页面只渲染写死的假数据，不碰数据库）。
+//   同理：本脚本自己（scripts/e2e-*）与任何 fixture 都是"下一个人还要用"的东西。
 
 const PORT = process.env.CDP_PORT ?? "9222"
 const BASE = `http://127.0.0.1:${PORT}`

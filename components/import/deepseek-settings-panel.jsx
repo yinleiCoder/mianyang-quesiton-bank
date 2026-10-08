@@ -25,7 +25,30 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { KeyRoundIcon, Trash2Icon, CheckCircle2Icon, Loader2Icon } from "lucide-react"
 
-export function DeepSeekSettingsPanel({ onChange, compact = false }) {
+// 文案按用途分两套：密钥是同一把（都存 localStorage、都从浏览器直连），但**费用量级差得远**，
+// 导入那句"一份 200 页的卷子约 ¥1~2"套到 AI 分析头上会吓着人（一次分析几分钱）。
+const COPY = {
+  parse: {
+    keyName: "解析密钥",
+    feature: "解析",
+    cost: "（一道题约 ¥0.0035，一份 200 页的卷子约 ¥1~2）",
+    hint: (m) => m.hint,
+  },
+  analyze: {
+    keyName: "分析密钥",
+    feature: "分析",
+    cost: "（一次班级分析约几分钱）",
+    // 模型说明也得换：导入那句"不支持图片会解析失败"在分析里是**反的误导** ——
+    // 分析只发文字数据，两个模型都完全够用，v4-pro 反而更强。
+    hint: (m) =>
+      m.value === "deepseek-v4-pro"
+        ? "纯文本能力更强；分析只发文字数据，两个模型都能用"
+        : "速度快、价格低；做班级分析够用",
+  },
+}
+
+export function DeepSeekSettingsPanel({ onChange, compact = false, purpose = "parse" }) {
+  const copy = COPY[purpose] ?? COPY.parse
   // 设置只在浏览器里，读到之前不能渲染真实分支（否则 hydration 对不上）
   const { masked: saved, model, ready, refresh } = useDeepSeekPrefs()
   const [value, setValue] = useState("")
@@ -93,7 +116,7 @@ export function DeepSeekSettingsPanel({ onChange, compact = false }) {
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900">
         <CheckCircle2Icon className="size-4 shrink-0" />
         <span>
-          解析密钥已配置（<b>{saved}</b>）· 模型 <b>{current?.value}</b>
+          {copy.keyName}已配置（<b>{saved}</b>）· 模型 <b>{current?.value}</b>
         </span>
         <span className="text-xs text-emerald-700">
           费用按用量记在你的 DeepSeek 账号上；请求从你的浏览器直达 DeepSeek，不经过本站服务器
@@ -118,8 +141,9 @@ export function DeepSeekSettingsPanel({ onChange, compact = false }) {
         需要先配置你自己的 DeepSeek 密钥
       </div>
       <p className="text-xs text-amber-800">
-        本功能不提供公共密钥：解析由 DeepSeek 完成，费用由使用者承担（一道题约 ¥0.0035，一份 200 页的卷子约
-        ¥1~2）。密钥<b>只保存在你这台电脑的浏览器里</b>，请求从浏览器直达 DeepSeek，不经过本站服务器。
+        本功能不提供公共密钥：{copy.feature}由 DeepSeek 完成，费用由使用者承担
+        {copy.cost}。密钥<b>只保存在你这台电脑的浏览器里</b>，请求从浏览器直达 DeepSeek，
+        不经过本站服务器。
       </p>
       {!compact && (
         <>
@@ -150,7 +174,7 @@ export function DeepSeekSettingsPanel({ onChange, compact = false }) {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-amber-800">{current?.hint}</p>
+            <p className="text-xs text-amber-800">{copy.hint(current)}</p>
           </div>
         </>
       )}
