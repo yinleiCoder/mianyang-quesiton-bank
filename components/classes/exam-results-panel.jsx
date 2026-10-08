@@ -31,7 +31,8 @@ export function ExamResultsPanel({ results, classId }) {
 
       {papers.length === 0 ? (
         <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
-          近 {days} 天这个班还没有考试成绩。学生在客户端自助考卷，交卷并出分后就会按卷出现在这里。
+          近 {days} 天这个班还没有考试成绩。学生在客户端自助考卷，交卷并出分后就会按卷出现在这里
+          ——每份卷都会带上「看成绩榜 / 讲评 / AI 分析」的入口。
         </p>
       ) : (
         <div className="space-y-3">

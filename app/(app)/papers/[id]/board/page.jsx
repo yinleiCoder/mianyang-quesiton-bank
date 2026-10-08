@@ -28,6 +28,9 @@ import { MyRankCard } from "@/components/analytics/my-rank-card"
 import { QuestionStatsList } from "@/components/analytics/question-stats-list"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { SparklesIcon } from "lucide-react"
 
 export async function generateMetadata({ params }) {
   const { id } = await params
@@ -80,6 +83,24 @@ export default async function PaperBoardPage({ params, searchParams }) {
     activeClassId,
   }
 
+  // AI 分析入口（0088 是「卷 + 班」粒度，所以要有选中的班才给；学生不给——那页是教师看的）。
+  // 挂在这一页是因为：看完成绩单最自然的下一步就是"让 AI 说说这个班"，而班级学情页那条路
+  // 得先想到"去班级看"，实际没人找得到（用户 2026-10-08 的反馈）。
+  const aiLink =
+    isStaff && activeClassId ? (
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          nativeButton={false}
+          render={<Link href={`/classes/${activeClassId}/ai/${id}`} />}
+        >
+          <SparklesIcon className="size-4" />
+          让 AI 分析这个班
+        </Button>
+      </div>
+    ) : null
+
   // ---------- 试题分析 ----------
   if (tab === "questions") {
     const { stats, needClass, denied, error } = await loadPaperQuestionStats(supabase, {
@@ -124,6 +145,7 @@ export default async function PaperBoardPage({ params, searchParams }) {
         ) : (
           <>
             <ScopeTabs {...shared} />
+            {aiLink}
             <QuestionStatsList items={stats?.items ?? []} studentLimit={stats?.student_limit ?? 50} />
           </>
         )}
@@ -175,6 +197,7 @@ export default async function PaperBoardPage({ params, searchParams }) {
       ) : (
         <>
           <ScopeTabs {...shared} />
+          {aiLink}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm">
             <span>
               上榜 <b className="tabular-nums">{stats.total ?? 0}</b> 人
