@@ -37,7 +37,7 @@ export default async function LecturePaperPage({ params, searchParams }) {
   const sp = (await searchParams) ?? {}
   const initialIndex = Number.parseInt(sp.i ?? "0", 10)
   const initialReveal = sp.reveal === "1"
-  let scope = ["class", "school", "city"].includes(sp.scope) ? sp.scope : "class"
+  let scope = ["class", "school", "city", "province"].includes(sp.scope) ? sp.scope : "class"
 
   const supabase = await createClient()
   const { data: paper, error: paperError } = await supabase
@@ -63,7 +63,10 @@ export default async function LecturePaperPage({ params, searchParams }) {
   let classId = null
   if (scope === "class") {
     const { classes } = await loadMyClassOptions(supabase)
-    classId = classes?.[0]?.class_id ?? null
+    // 从班级学情页点进来时带着 ?class=：只在**我自己名下**的班里认它（认不出就退回第一个班），
+    // 免得"从 3 班点讲评、投出来讲的是 1 班"。真正的权限在 RPC 里还有一道，这里只决定选哪个班。
+    const wanted = (classes ?? []).find((c) => c.class_id === sp.class)
+    classId = wanted?.class_id ?? classes?.[0]?.class_id ?? null
     if (!classId) scope = "school"
   }
 

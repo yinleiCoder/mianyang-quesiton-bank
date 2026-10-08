@@ -6,7 +6,7 @@ import { fmtDuration, rankTone } from "@/lib/analytics"
 // 榜单表格。纯 CSS，不引 recharts——这一页全是文字与数字，扛一个 300KB 的图表库不划算
 // （components/students/student-detail.jsx 的头注已经把这条教训写死了）。
 //
-// 三档口径共用一张表，只是"次要那一列"不同：班级榜看班级、全校/全市看学校。
+// 四档口径共用一张表，只是"次要那一列"不同：班级榜看班级、全校/全市/全省看学校。
 // 学校名一律显示（用户明确要求"排行应标注出学校信息"）。
 function Row({ row, showSchool }) {
   const name = row.name ?? "（已注销）"

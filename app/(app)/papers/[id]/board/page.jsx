@@ -1,4 +1,5 @@
-// 试卷的成绩与试题分析：两个页签（成绩排行 / 试题分析）× 三档范围（全班/全校/全市）。
+// 试卷的成绩与试题分析：两个页签（成绩排行 / 试题分析）× 四档范围（全班/全校/全市/全省，
+// 键表在 lib/analytics.js —— 0086 加 province，同一次把"全市"从全平台收成真按市筛）。
 //
 // 数据来自两个 SECURITY DEFINER 的 RPC（0077 / 0078），各自**一次取齐**整页所需的全部内容
 // （与 /students/[id] 同一条做法：一个 RPC = 一个 await，不拆多个 Suspense 边界）。
@@ -118,7 +119,7 @@ export default async function PaperBoardPage({ params, searchParams }) {
         <BoardTabs {...shared} />
         {needClass ? (
           <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
-            你还看不到任何班级（教师需要学校管理员先分配专业与班级）。先切到「全校」或「全市」。
+            你还看不到任何班级（教师需要学校管理员先分配专业与班级）。先切到「全校」「全市」或「全省」。
           </p>
         ) : (
           <>

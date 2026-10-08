@@ -66,6 +66,7 @@ export function MyRankCard({ board, viewerNote }) {
             <span className="text-muted-foreground tabular-nums">
               全校 {viewer.school_rank}/{viewer.school_total}
               {viewer.city_rank ? ` · 全市 ${viewer.city_rank}/${viewer.city_total}` : ""}
+              {viewer.province_rank ? ` · 全省 ${viewer.province_rank}/${viewer.province_total}` : ""}
             </span>
           )}
         </div>
