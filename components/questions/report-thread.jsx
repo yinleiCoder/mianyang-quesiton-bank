@@ -25,6 +25,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Loader2Icon, SendIcon, UndoIcon } from "lucide-react"
+import { SkeletonRows } from "@/components/ui/skeletons"
 
 const MAX_LEN = 1000
 
@@ -129,7 +130,10 @@ export function ReportThread({ reportId, isOpen, canWithdraw = false, onChanged 
       </div>
 
       {messages === null ? (
-        <p className="mt-2 text-xs text-muted-foreground">加载中…</p>
+        <div className="mt-2">
+          <span className="sr-only">往来消息加载中</span>
+          <SkeletonRows rows={2} />
+        </div>
       ) : messages.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">还没有往来消息。</p>
       ) : (

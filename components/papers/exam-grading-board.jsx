@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { QuestionView } from "@/components/questions/question-view"
+import { Skeleton } from "@/components/ui/skeleton"
+import { SkeletonRows } from "@/components/ui/skeletons"
 import { fmtDateTime } from "@/lib/format"
 import { round2 } from "@/lib/paper-model"
 import { qtypeLabel } from "@/lib/question-model"
@@ -323,7 +325,13 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
       </aside>
 
       <main className="min-h-0 space-y-4">
-        {loading && <p className="py-8 text-center text-sm text-muted-foreground">载入中…</p>}
+        {loading && (
+          <>
+            <span className="sr-only">试卷载入中</span>
+            <SkeletonRows rows={4} />
+            <Skeleton className="h-56 rounded-xl" />
+          </>
+        )}
         {!loading && !current && (
           <p className="rounded-xl border border-dashed py-16 text-center text-sm text-muted-foreground">
             从左边选一份卷子开始批阅

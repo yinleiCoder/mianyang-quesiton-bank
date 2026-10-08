@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { SearchIcon, PlusIcon, GripVerticalIcon } from "lucide-react"
+import { SkeletonRows } from "@/components/ui/skeletons"
 
 const PAGE_SIZE = 20
 // LIKE 通配符转义：关键词里的 %/_ 要按字面匹配（与 /bank 页同口径）
@@ -204,8 +205,13 @@ export function QuestionPicker({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
-        {loading && <p className="py-4 text-center text-xs text-muted-foreground">加载中…</p>}
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1" aria-busy={loading}>
+        {loading && (
+          <>
+            <span className="sr-only">题目列表加载中</span>
+            <SkeletonRows rows={5} />
+          </>
+        )}
         {!loading && rows.length === 0 && (
           <p className="py-4 text-center text-xs text-muted-foreground">没有找到符合条件的题目</p>
         )}
