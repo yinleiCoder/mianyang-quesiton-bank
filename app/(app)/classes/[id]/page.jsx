@@ -5,8 +5,10 @@
 //     两者没有共享的行级操作，塞一起只会让 ?tab= 与 ?page= 互相污染；
 //   · 班级是实体（0063 建的 classes 表），它本来就该有一个能发到教研群里的 URL。
 //
-// 数据两块来源，各取所需：
-//   · class_learning_report（0079）：参与度 / 趋势 / 知识点 / 高危题 / 预警；
+// 数据三块来源，各取所需：
+//   · class_learning_report（0079）：参与度 / 趋势 / 知识点 / 高危题 / 预警 —— **练习口径**；
+//   · class_exam_results（0087）：考试结果（每份卷的最高/最低/进步最大 + 分数段）—— **考试口径**，
+//     两者共用同一个时间窗，但一个看的是刷题、一个看的是考试，别把数字互相加减；
 //   · list_my_students（0063）：学生对照表——它已有每人的正确率与最近练习，
 //     且权限门与看板一致，不重复实现。
 //
@@ -15,11 +17,12 @@
 import { requireUser, getAuthContext } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { loadSubjectNodes } from "@/lib/reference-data"
-import { loadClassReport, percentText } from "@/lib/analytics"
+import { loadClassReport, loadClassExamResults, percentText } from "@/lib/analytics"
 import { gradeLabel, loadStudentRoster } from "@/lib/students"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
 import { ParticipationPanel } from "@/components/classes/participation-panel"
+import { ExamResultsPanel } from "@/components/classes/exam-results-panel"
 import { WeaknessPanel } from "@/components/classes/weakness-panel"
 import { AlertsPanel } from "@/components/classes/alerts-panel"
 import { StudentTable } from "@/components/classes/student-table"
@@ -47,13 +50,14 @@ export default async function ClassReportPage({ params, searchParams }) {
   const days = DAY_OPTIONS.includes(Number(sp.days)) ? Number(sp.days) : 30
 
   const supabase = await createClient()
-  const [reportRes, rosterRes, nodes] = await Promise.all([
+  const [reportRes, examsRes, rosterRes, nodes] = await Promise.all([
     loadClassReport(supabase, { classId: id, days }),
+    loadClassExamResults(supabase, { classId: id, days }),
     loadStudentRoster(supabase, { classId: id, pageSize: 200 }),
     loadSubjectNodes(),
   ])
 
-  if (reportRes.denied) {
+  if (reportRes.denied || examsRes.denied) {
     return (
       <AccessDenied
         title="不能查看这个班级的学情"
@@ -62,6 +66,7 @@ export default async function ClassReportPage({ params, searchParams }) {
     )
   }
   if (reportRes.error) throw reportRes.error
+  if (examsRes.error) throw examsRes.error
 
   const report = reportRes.report ?? {}
   const info = report.class ?? {}
@@ -112,6 +117,8 @@ export default async function ClassReportPage({ params, searchParams }) {
         </div>
       </div>
 
+      {/* 考试结果放在最前面：用户要的是"尤其是考试卷结果"，它是这一页最该先看到的东西 */}
+      <ExamResultsPanel results={examsRes.results} classId={id} />
       <ParticipationPanel report={report} />
       <WeaknessPanel report={report} nodes={nodes ?? []} />
       <AlertsPanel report={report} />
