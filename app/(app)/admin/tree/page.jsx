@@ -1,11 +1,12 @@
 // 科目树维护（仅系统管理员）：公共科目（discipline 单层或下挂 course）与
-// 专业目录（category → major → course）两棵树，支持增/改名/冻结/删除。
+// 专业目录（category → major → course）两棵树，支持增/改名/冻结/删除（列表视图）
+// 与**拖拽改挂点**（画布视图，0089 的 admin_move_subject_node）。
 // 任意层级的节点都能挂题（2026-09-24 起，见 lib/subject-nodes.js）。
 import { requireUser } from "@/lib/auth"
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
-import { TreeManager } from "@/components/admin/tree-manager"
+import { TreeViews } from "@/components/admin/tree-views"
 
 export const metadata = { title: "科目树维护" }
 
@@ -30,7 +31,7 @@ export default async function AdminTreePage() {
           </>
         }
       />
-      <TreeManager nodes={nodes ?? []} />
+      <TreeViews nodes={nodes ?? []} />
     </div>
   )
 }
