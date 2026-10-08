@@ -2,9 +2,11 @@
 
 // 知识点标签选择器：搜索已有标签（同名不区分大小写）+ 回车新建（create_tag RPC）。
 // value: [{id,name}]（新标签即时回调）；标签随草稿保存，改名校验在提交时走 DB 快照。
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { createFuse, searchFuse } from "@/lib/fuzzy"
+import { useDebounced } from "@/lib/use-debounced"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Loader2Icon, PlusIcon, SearchIcon, XIcon } from "lucide-react"
@@ -29,10 +31,18 @@ export function TagPicker({ value = [], onChange, allowCreate = true }) {
 
   const selectedIds = new Set(value.map((t) => t.id))
   const s = q.trim().toLowerCase()
-  // 候选：未选中的标签，输入时按名过滤；空输入即"全部未选标签"（面板只展示前 8 个）
-  const suggestions = (all ?? [])
-    .filter((t) => !selectedIds.has(t.id) && (!s || t.name.toLowerCase().includes(s)))
-    .slice(0, 8)
+  // 候选：未选中的标签。空输入 = 全部未选标签的前 8 个；输入时走**模糊匹配**——
+  // 标签是人手敲的，"excel函数" 与 "函数 Excel" 该搜到同一个（includes 做不到）。
+  // 列表小（全量在客户端），防抖只为统一口径，150ms 感觉不出来。
+  const qd = useDebounced(q.trim(), 150)
+  const fuse = useMemo(() => createFuse(all ?? [], ["name"]), [all])
+  const suggestions = useMemo(() => {
+    const pool = (all ?? []).filter((t) => !selectedIds.has(t.id))
+    if (!qd) return pool.slice(0, 8)
+    return searchFuse(fuse, qd, 8).filter((t) => !selectedIds.has(t.id))
+    // selectedIds 每次渲染都是新的 Set，但语义只跟 value 走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, fuse, qd, value])
 
   const addExisting = (t) => {
     onChange([...value, t])
