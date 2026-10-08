@@ -10,6 +10,7 @@ import { loadMyAssignments, loadMyTaskCount, assignmentStateChip, spanLabel } fr
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { indexNodes, isPaperNode } from "@/lib/subject-nodes"
 import { PaperCard } from "@/components/papers/paper-card"
+import { PaperDeleteButton } from "@/components/papers/paper-delete-button"
 import { PageHeader } from "@/components/page-header"
 import { EmptyState } from "@/components/empty-state"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +21,11 @@ import { PlusIcon, SearchIcon, FileStackIcon, ClipboardListIcon } from "lucide-r
 export const metadata = { title: "组卷库" }
 
 const PAGE_SIZE = 20
+
+// 能不能删：与 delete_paper_draft 的断言同一条 —— 只有"从没提交过审核"的纯草稿。
+// 列表给的是**最新**那一版：草稿且还是第 1 版，说明这份卷子从建出来到现在没提交过；
+// 一旦提交过（在审/退回/已撤回/已入库），状态就不再是 draft，或版本号已经 > 1。
+const canDeletePaper = (p) => p.status === "draft" && Number(p.version_no) === 1
 
 export default async function PapersPage({ searchParams }) {
   const sp = (await searchParams) ?? {}
@@ -182,7 +188,15 @@ export default async function PapersPage({ searchParams }) {
       ) : (
         <div className="space-y-3">
           {papers.map((p) => (
-            <PaperCard key={p.version_id} paper={p} ownerView={tab === "mine"} />
+            <div key={p.version_id} className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <PaperCard paper={p} ownerView={tab === "mine"} />
+              </div>
+              {/* 只有"从没提交过的纯草稿"给删除入口：这条判据与详情页、与
+                  delete_paper_draft 里的断言是同一条。全部试卷页签里都是已入库的卷子，
+                  不可能是这个状态，所以那边自然不会出现按钮 */}
+              {canDeletePaper(p) && <PaperDeleteButton paperId={p.paper_id} title={p.title} />}
+            </div>
           ))}
         </div>
       )}

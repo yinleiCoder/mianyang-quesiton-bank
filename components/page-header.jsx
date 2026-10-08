@@ -5,8 +5,8 @@ import { Reveal } from "@/components/ui/reveal"
 // centered 用于 (auth) 两页（居中卡片内的标题），其余页面用默认左对齐。
 // title/description 接受 ReactNode：部分页面需要条件文案或内嵌强调样式。
 //
-// 入场动画挂在这里 = 全站每个页面都有一处一致的"进场"（见 components/ui/reveal.jsx 的规矩：
-// 只做一次淡入上移、尊重 prefers-reduced-motion）。页面内部再需要分段入场时各自用 <Reveal>。
+// 入场动画挂在这里 = 全站每个页面都有一处一致的"进场"（规矩见 components/ui/reveal.jsx：
+// 只做一次淡入上移，不做循环动画）。页面内部再需要分段入场时各自用 <Reveal>。
 export function PageHeader({ title, description, centered = false, className = "" }) {
   return (
     <Reveal

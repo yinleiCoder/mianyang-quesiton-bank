@@ -8,7 +8,10 @@ import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { statusChip } from "@/lib/question-model"
 import { fmtDateTime24 } from "@/lib/format"
+import { contentFlowSteps, deriveChain, requestFlowSteps } from "@/lib/approval-flow"
 import { QuestionView } from "@/components/questions/question-view"
+import { ApprovalFlowCanvas } from "@/components/review/approval-flow-canvas"
+import { Reveal } from "@/components/ui/reveal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
@@ -24,76 +27,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Loader2Icon } from "lucide-react"
-
-/* ---------- 步骤状态推导（content 任务） ---------- */
-function deriveChain(v, timeline) {
-  // RLS 只暴露与当前用户相关的行：组长看不到专家的待办行、专家看不到组长的通过行。
-  // 步骤条按可见行 + 版本状态兜底推导，缺行 ≠ 流程断。
-  const byTime = timeline
-    .filter((t) => t.kind === "content")
-    .sort((x, y) => String(x.createdAt).localeCompare(String(y.createdAt)))
-  const last = (stage) => byTime.findLast((t) => t.stage === stage) ?? null
-  const group = last("group")
-  const city = last("city")
-  const published = v && (v.status === "published" || v.status === "superseded")
-  // 撤回/重审的取消行只在它是当前最新事件时提示（旧代际的取消历史留在时间线里）
-  const cancelledBy = byTime.at(-1)?.state === "cancelled" ? byTime.at(-1) : null
-  return { group, city, published, cancelledBy }
-}
-
-// 审批行 → 步骤状态：已决按结果，未决即"当前待办"，无行时用兜底值
-function stepState(row, fallback = "") {
-  if (!row) return fallback
-  if (row.state === "approved") return "done"
-  if (row.state === "returned") return "halted"
-  return "current"
-}
-
-function StepDot({ done, current, halted }) {
-  const cls = done
-    ? "bg-emerald-500 text-white border-emerald-500"
-    : halted
-      ? "bg-rose-100 text-rose-600 border-rose-300"
-      : current
-        ? "border-amber-400 bg-amber-50 text-amber-600 ring-4 ring-amber-100"
-        : "border-muted-foreground/30 text-muted-foreground/50"
-  return (
-    <span
-      className={`flex size-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${cls}`}
-    >
-      {done ? "✓" : halted ? "✕" : ""}
-    </span>
-  )
-}
-
-function StepBox({ label, state, by, at, comment, children }) {
-  return (
-    <div className="flex flex-1 flex-col items-center gap-2 text-center">
-      <StepDot
-        done={state === "done"}
-        halted={state === "halted"}
-        current={state === "current"}
-      />
-      <div className="space-y-0.5">
-        <p className={`text-xs font-medium ${state === "current" ? "text-amber-600" : ""}`}>{label}</p>
-        {state === "current" && <p className="text-xs font-semibold text-amber-600">待处理</p>}
-        {state === "halted" && <p className="text-xs font-medium text-rose-600">已退回</p>}
-        {state === "done" && by && (
-          <p className="text-xs text-muted-foreground">
-            {by}
-            {at ? <span className="block">{fmtDateTime24(at)}</span> : null}
-          </p>
-        )}
-        {comment && <p className="line-clamp-3 max-w-56 text-xs text-muted-foreground">“{comment}”</p>}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function Connector({ done }) {
-  return <div className={`h-0.5 min-w-4 flex-1 rounded ${done ? "bg-emerald-400" : "bg-border"}`} />
-}
 
 export function ReviewDetail({ data }) {
   const router = useRouter()
@@ -148,11 +81,25 @@ export function ReviewDetail({ data }) {
     router.refresh()
   }
 
-  const chain = a.kind === "content" ? deriveChain(v, data.timeline) : null
+  const chain =
+    a.kind === "content"
+      ? { ...deriveChain(data.timeline, "content"), published: Boolean(v && (v.status === "published" || v.status === "superseded")) }
+      : null
   const versionChip = v ? statusChip(v.status) : null
   // 处理人是一组人（岗位池）：空池 = 待指派
   const noAssignee = a.state === "waiting" && a.assignedUserIds.length === 0
   const assignedLabel = a.assignedNames.join("、")
+  // 流程图的节点数据。推导在 lib/approval-flow.js，与试卷审批共用同一份口径。
+  const flowSteps = chain
+    ? contentFlowSteps({
+        chain,
+        version: v,
+        creatorName: data.question.creatorName,
+        stage: a.stage,
+        state: a.state,
+        assignedLabel,
+      })
+    : requestFlowSteps({ approval: a, creatorName: data.question.creatorName, assignedLabel })
 
   // 转派目标不可为作者本人或池内已有的人
   const notTargetable = (c) =>
@@ -168,7 +115,9 @@ export function ReviewDetail({ data }) {
   }
 
   return (
-    <div className="space-y-4">
+    // 整页分区依次入场（头部 → 操作条 → 流程图 → 题目 → 时间线）。
+    // 用 Reveal 而不是给每块写动画：全站动画只有一个入口，见 components/ui/reveal.jsx。
+    <Reveal className="space-y-4" stagger={0.06} y={8} duration={0.35}>
       {/* 头部：位置 + 基础信息 */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
@@ -222,51 +171,10 @@ export function ReviewDetail({ data }) {
         </div>
       )}
 
-      {/* 步骤条 */}
+      {/* 审批流程（画布）：一步一步走成什么样，以及任务此刻卡在谁那里 */}
       <div className="rounded-xl border p-4">
-        {a.kind === "content" && chain ? (
-          <div className="flex items-start">
-            <StepBox label="教师提交" state="done" by={data.question.creatorName} at={v?.submittedAt} />
-            <Connector done />
-            <StepBox
-              label="教研组长审核"
-              // 组长行不可见但已进专家环节 → 视为已通过
-              state={stepState(chain.group, chain.city ? "done" : "current")}
-              by={chain.group?.decidedByName}
-              at={chain.group?.decidedAt}
-              comment={chain.group?.comment}
-            />
-            <Connector done={chain.group?.state === "approved"} />
-            <StepBox
-              label="市级专家审核"
-              state={stepState(
-                chain.city,
-                chain.group?.state === "approved" || (chain.group?.state !== "returned" && chain.published)
-                  ? "current"
-                  : ""
-              )}
-              by={chain.city?.decidedByName}
-              at={chain.city?.decidedAt}
-              comment={chain.city?.comment}
-            />
-            <Connector done={chain.city?.state === "approved"} />
-            <StepBox label="入库" state={chain.published ? "done" : ""} by={chain.published ? "系统" : null} at={v?.publishedAt} />
-          </div>
-        ) : (
-          <div className="flex items-start">
-            <StepBox label="发起申请" state="done" by={data.question.creatorName} at={a.createdAt} />
-            <Connector done />
-            <StepBox
-              label={a.stageLabel}
-              state={stepState(a)}
-              by={a.decidedByName}
-              at={a.decidedAt}
-              comment={a.comment}
-            />
-            <Connector done={a.state === "approved"} />
-            <StepBox label={`题目${a.kind === "offline" ? "下线" : "恢复上线"}`} state={a.state === "approved" ? "done" : ""} />
-          </div>
-        )}
+        <p className="mb-3 text-sm font-medium">审批流程</p>
+        <ApprovalFlowCanvas steps={flowSteps} />
         {/* 已退回/取消提示 */}
         {a.kind === "content" && v?.status === "returned" && (
           <p className="mt-3 text-xs text-rose-600">该版本已被退回，作者修改后重新提交将全链重审。</p>
@@ -425,6 +333,6 @@ export function ReviewDetail({ data }) {
           </AlertDialogContent>
         </AlertDialog>
       )}
-    </div>
+    </Reveal>
   )
 }

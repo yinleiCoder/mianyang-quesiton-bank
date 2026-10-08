@@ -50,3 +50,6 @@ next-env.d.ts
 mianyang_quiz/*
 .vercel
 .env*
+
+# 造字体子集时的中间产物（原字体 10MB，产物已入库；重建步骤见 scripts/build-cjk-subset.mjs）
+/scripts/.fontwork/

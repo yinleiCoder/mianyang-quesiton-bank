@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server"
 import { loadPaperVersion } from "@/lib/paper-workbench"
 import { PaperSheet } from "@/components/papers/paper-sheet"
 import { PrintButton } from "@/components/print-button"
+import { ExportPdfButton } from "@/components/papers/export-pdf-button"
 import { AccessDenied } from "@/components/access-denied"
 import { Button } from "@/components/ui/button"
 
@@ -37,6 +38,10 @@ export default async function PrintPaperAnswersPage({ params }) {
         <Button variant="outline" nativeButton={false} render={<Link href={`/print/paper/${id}`} />}>
           打印正卷（不含答案）
         </Button>
+      </div>
+
+      <div className="mb-6 print:hidden">
+        <ExportPdfButton snapshot={snapshot} mode="answers" hint="含答案与解析的 PDF，注意别发给学生" />
       </div>
 
       <div className="mb-4 border-b-2 border-black/60 pb-2">

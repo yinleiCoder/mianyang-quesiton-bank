@@ -11,6 +11,7 @@ import { loadPeople } from "@/lib/people"
 import { fmtDate } from "@/lib/format"
 import { round2 } from "@/lib/paper-model"
 import { PaperSheet } from "@/components/papers/paper-sheet"
+import { ExportPdfButton } from "@/components/papers/export-pdf-button"
 import { PaperActions } from "@/components/papers/paper-actions"
 import { PaperInsightLinks } from "@/components/papers/paper-insight-links"
 import { AccessDenied } from "@/components/access-denied"
@@ -129,14 +130,18 @@ export default async function PaperDetailPage({ params }) {
               <ClipboardCheckIcon className="size-4" /> 阅卷
             </Button>
           )}
+          {/* 打印与下载配对相邻：同一件东西的两条出口（浏览器打印用系统字体，
+              下载的是自己排版、内嵌字体的文件），别让人在两排按钮里找 */}
           <Button variant="outline" nativeButton={false} render={<a href={`/print/paper/${versionId}`} target="_blank" rel="noreferrer" />}>
             <PrinterIcon className="size-4" /> 打印正卷
           </Button>
+          <ExportPdfButton snapshot={snapshot} mode="paper" hint="" />
           {ctx.isTeacher && (
             <Button variant="outline" nativeButton={false} render={<a href={`/print/paper/${versionId}/answers`} target="_blank" rel="noreferrer" />}>
               <FileCheckIcon className="size-4" /> 打印答案
             </Button>
           )}
+          {ctx.isTeacher && <ExportPdfButton snapshot={snapshot} mode="answers" hint="" />}
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { qtypeLabel, difficultyLabel } from "@/lib/question-model"
 import { indexNodes } from "@/lib/subject-nodes"
-import { loadSchools, loadSubjectNodes, schoolNameOf } from "@/lib/reference-data"
+import { loadCityMap, loadSchools, loadSubjectNodes, schoolCityOf, schoolNameOf } from "@/lib/reference-data"
 import { fmtDate } from "@/lib/format"
 import { loadPeople } from "@/lib/people"
 import {
@@ -55,7 +55,7 @@ export default async function BankQuestionPage({ params }) {
 
   // 学校名单走缓存的参考数据（全市共 9 行、与调用者无关），不在这里单独查 ——
   // 详情页本来就只有 1 行数据要装配，为它在并发波里多占一格连接不划算。
-  const [vRes, nodes, schools, tagRes, apprRes, accuracyRes, myReportRes] = await Promise.all([
+  const [vRes, nodes, schools, cityMap, tagRes, apprRes, accuracyRes, myReportRes] = await Promise.all([
     supabase
       .from("question_versions")
       .select("id, version_no, change_type, qtype, difficulty, content, published_at, created_by")
@@ -63,6 +63,8 @@ export default async function BankQuestionPage({ params }) {
       .single(),
     loadSubjectNodes(),
     loadSchools(),
+    // 市字典：「题源」旁边的「市区」要用。cities 对 anon 是关的，只能走已登录客户端
+    loadCityMap(supabase),
     supabase.from("version_tags").select("tag_name").eq("version_id", q.current_published_version_id),
     supabase.rpc("bank_reviewers", { p_version_ids: [q.current_published_version_id] }),
     // 全站作答统计（按题目聚合，跨版本累计）。无人作答时该题不会出现在结果里 → accuracy 为 undefined。
@@ -78,6 +80,7 @@ export default async function BankQuestionPage({ params }) {
   const { pathOf: nodePath } = indexNodes(nodes)
   const tags = (tagRes.data ?? []).map((t) => t.tag_name)
   const schoolName = schoolNameOf(schools, q.school_id) ?? ""
+  const schoolCity = schoolCityOf(schools, cityMap, q.school_id) ?? ""
 
   // 作者 + 两级审核通过人（决定人已注销的审批行 decided_by 已置空 → 不计入）
   const approvedBy = (apprRes.data ?? []).filter((a) => a.decided_by)
@@ -176,6 +179,7 @@ export default async function BankQuestionPage({ params }) {
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
           <span>{nodePath(q.course_node_id) || "未选节点"}</span>
           {schoolName && <span>题源：{schoolName}</span>}
+          {schoolCity && <span>市区：{schoolCity}</span>}
           {authorEverExisted && <PersonChip person={author} caption="作者" />}
           {reviewers.map((r) => (
             <PersonChip key={r.caption} person={r.person} caption={r.caption} />

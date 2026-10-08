@@ -9,6 +9,8 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { PaperSheet } from "@/components/papers/paper-sheet"
+import { ApprovalFlowCanvas } from "@/components/review/approval-flow-canvas"
+import { paperFlowSteps } from "@/lib/approval-flow"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -34,6 +36,15 @@ export function PaperReviewDetail({ data }) {
   const { approval, paper, snapshot, timeline, candidates, meId, canAct, canTransfer } = data
   // 转派目标不能是池里已有的人（服务端也会拦，这里先筛掉免得选了才报错）
   const transferTargets = candidates.filter((c) => !(approval.assignedUserIds ?? []).includes(c.user_id))
+  // 流程图的节点数据，与题目审批共用 lib/approval-flow.js 的推导
+  const flowSteps = paperFlowSteps({
+    timeline,
+    version: snapshot,
+    creatorName: paper.creatorName,
+    stage: approval.stage,
+    state: approval.state,
+    assignedLabel: (approval.assignedNames ?? []).join("、"),
+  })
 
   async function call(fn, args, okMsg) {
     setBusy(true)
@@ -114,7 +125,9 @@ export function PaperReviewDetail({ data }) {
       </div>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">审批流转</h2>
+        <h2 className="text-sm font-medium">审批流程</h2>
+        <ApprovalFlowCanvas steps={flowSteps} />
+        <h2 className="pt-2 text-sm font-medium">审批流转记录</h2>
         <div className="space-y-2">
           {timeline.map((t) => (
             <div key={t.id} className="rounded-lg border p-3 text-sm">

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/empty-state"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { Reveal } from "@/components/ui/reveal"
 import { ArrowRightIcon, CheckCircle2Icon, CircleSlash2Icon, InboxIcon, RotateCcwIcon } from "lucide-react"
 
 // 批量通过的两个口径。语义不同（入库 vs 只是流转），所以是两个按钮、两次确认，绝不合并：
@@ -170,11 +171,13 @@ export function ReviewInbox({
       {current.rows.length === 0 ? (
         <EmptyState {...current.empty} />
       ) : (
-        <div className="space-y-2">
+        // 列表逐条入场：待办是"一屏里挑一件来做"的场景，一条条落下来比整块闪现
+        // 更容易让人看清这里有几件事（key 跟着页签走，切页签会重放）
+        <Reveal key={tab} className="space-y-2" stagger={0.04} y={6} duration={0.3}>
           {current.rows.map((r) => (
             <Row key={r.approval.id} r={r} {...current.rowProps} />
           ))}
-        </div>
+        </Reveal>
       )}
 
       {/* 批量确认（条件挂载）：进度写进确认按钮——几百条要跑一会儿 */}

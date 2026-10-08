@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { contentSummary, qtypeLabel, difficultyLabel } from "@/lib/question-model"
 import { indexNodes, subtreeIdsOf } from "@/lib/subject-nodes"
-import { loadSchools, loadSubjectNodes, loadTags } from "@/lib/reference-data"
+import { loadCityMap, loadSchools, loadSubjectNodes, loadTags, schoolCityOf } from "@/lib/reference-data"
 import { bankQueryString, hasBankFilters, parseBankFilters } from "@/lib/bank-query"
 import {
   accuracyWrongCount,
@@ -42,10 +42,14 @@ export default async function BankPage({ searchParams }) {
   // 走缓存的参考数据（lib/reference-data.js），不再每个请求各打一次往返。
   // 学校名单就是为了这个才加进来的：本页要为「题源」显示校名，原先按本页涉及到的学校单独查一次
   // —— 那是每次 /bank 渲染的 4 个并发查询之一，而全校只有 9 行、还是恒定不变的。
-  const [nodes, tags, schools] = await Promise.all([
+  // 市字典（题源旁边要显示市区）：cities 对 anon 是关的（0082 刻意如此），所以它读不了
+  // 上面那两条走 anon 的缓存路径，得用这份**已登录**的客户端。并进这一波并发里，
+  // 不额外多一次串行往返。
+  const [nodes, tags, schools, cityMap] = await Promise.all([
     loadSubjectNodes(),
     loadTags(),
     loadSchools(),
+    loadCityMap(supabase),
   ])
   const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
 
@@ -150,6 +154,7 @@ export default async function BankPage({ searchParams }) {
       summary: contentSummary(content),
       nodePath: nodePath(q.course_node_id),
       schoolName: schoolMap.get(q.school_id) ?? "",
+      schoolCity: schoolCityOf(schools, cityMap, q.school_id) ?? "",
       chips,
       subs,
       tags: tagsByVersion.get(v.id) ?? [],
@@ -265,6 +270,9 @@ export default async function BankPage({ searchParams }) {
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span className="truncate">{r.nodePath || "未选节点"}</span>
                 {r.schoolName && <span>题源：{r.schoolName}</span>}
+                {/* 校名同名或跨市复用的情况不罕见（"职业技术学校"满地都是），
+                    所以市区跟着题源一起写出来 —— 没挂市的学校（0082 之前的老数据）就不显示 */}
+                {r.schoolCity && <span>市区：{r.schoolCity}</span>}
                 {r.chips.map((c) => (
                   <PersonChip key={c.key} person={c.person} caption={c.caption} />
                 ))}

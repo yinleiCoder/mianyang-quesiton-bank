@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server"
 import { loadPaperVersion } from "@/lib/paper-workbench"
 import { PaperSheet } from "@/components/papers/paper-sheet"
 import { PrintButton } from "@/components/print-button"
+import { ExportPdfButton } from "@/components/papers/export-pdf-button"
 import { AccessDenied } from "@/components/access-denied"
 
 export const metadata = { title: "打印试卷" }
@@ -41,6 +42,10 @@ export default async function PrintPaperPage({ params }) {
   return (
     <div className="mx-auto max-w-[820px] bg-white p-8 text-black print:p-0">
       <PrintButton hint="在打印对话框里选「另存为 PDF」即可保存；参考答案请用「打印答案」" />
+      {/* 直接下载一份 PDF（自己排版、内嵌字体），与上面那条"浏览器打印"并存 */}
+      <div className="mb-6 print:hidden">
+        <ExportPdfButton snapshot={snapshot} mode="paper" hint="直接生成 PDF 文件下载，不弹打印对话框" />
+      </div>
       <PaperSheet snapshot={snapshot} mode="paper" />
       <footer className="mt-8 border-t border-black/20 pt-2 text-[10px] text-black/50">
         职教高考联盟 · 本卷题目均取自全省共建题库，经两级审核入库

@@ -11,8 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 //   · 每个组合件都带 `aria-hidden`，由调用方在容器上给 `aria-busy`/`sr-only` 文案
 //     —— 屏幕阅读器念一串空 div 没有意义（见 app/(app)/loading.jsx 的做法）；
 //   · 行数/列数给默认值但都可以覆盖，让骨架**贴近真实内容的体量**（三行 vs 十行是两种观感）；
-//   · 不做动画以外的花样：`animate-pulse` 由 <Skeleton> 自带，尊重 prefers-reduced-motion
-//     交给全局 CSS（globals.css 里有 media query）。
+//   · 不做动画以外的花样：`animate-pulse` 由 <Skeleton> 自带（顺带说明：它一直动，
+//     没有 prefers-reduced-motion 降级——这是产品的明确口径，见 components/ui/reveal.jsx）。
 
 /** 列表行：左边头像/图标位，中间两行文字，右侧一个数值。题库、名册、审核队列都是这个形。 */
 export function SkeletonRows({ rows = 5, className }) {

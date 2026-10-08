@@ -81,7 +81,11 @@ export function LectureDeck({ paper, slides, board, initialIndex, initialReveal 
   const slide = index === 0 ? null : slides[index - 1]
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-50">
+    // `dark` 不是装饰：这一屏是**深色舞台**（投屏用），而里面的 Button 等组件读的是主题变量。
+    // 全站没有主题切换器（app/layout.js 从不加 dark 类），所以不加这个类的话，
+    // Button 会按**亮色**取值 —— variant="outline" 的白底 + 这里继承下去的近白字
+    // = 一排看不见的空药丸（2026-10-08 实测：bg lab(100 0 0) / color lab(98.1 …)）。
+    <div className="dark flex min-h-screen flex-col bg-slate-950 text-slate-50">
       {/* 顶部细条：位置 + 操作。鼠标也得能用——只有键盘的话讲不了课 */}
       <header className="flex flex-wrap items-center gap-2 border-b border-slate-800 px-4 py-2">
         <span className="truncate text-sm font-medium">{paper.title}</span>
@@ -118,12 +122,16 @@ export function LectureDeck({ paper, slides, board, initialIndex, initialReveal 
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto p-6">
-        {slide ? (
-          <QuestionSlide slide={slide} reveal={reveal} />
-        ) : (
-          <OpeningSlide paper={paper} board={board} onStart={() => goTo(1)} />
-        )}
+      {/* 内容在舞台里居中（m-auto 而不是 items-center：内容比一屏高的时候，
+          居中会让顶部被裁掉，m-auto 不会——这是对着投影仪时最容易踩的一个） */}
+      <main className="flex min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="m-auto w-full">
+          {slide ? (
+            <QuestionSlide slide={slide} reveal={reveal} />
+          ) : (
+            <OpeningSlide paper={paper} board={board} onStart={() => goTo(1)} />
+          )}
+        </div>
       </main>
 
       <footer className="border-t border-slate-800 px-4 py-1.5 text-center text-xs text-slate-500">
@@ -163,15 +171,20 @@ function OpeningSlide({ paper, board, onStart }) {
 
       <div>
         <p className="mb-2 text-sm text-slate-400">成绩分布（按得分率分 10 档）</p>
-        <div className="flex h-48 items-end gap-2">
+        <div className="flex h-48 gap-2">
           {buckets.map((b) => (
-            <div key={b.from} className="flex flex-1 flex-col items-center gap-1">
-              <span className="text-xs tabular-nums text-slate-400">{b.count || ""}</span>
-              <div
-                className="w-full rounded-t bg-sky-500/70"
-                style={{ height: `${Math.max(2, Math.round((b.count / maxCount) * 100))}%` }}
-              />
-              <span className="text-xs tabular-nums text-slate-500">{b.from}%</span>
+            // 柱子用百分比高度，所以**必须**有一个高度确定的父级：
+            // 外层给 h-full、中间那层 flex-1 才是"绘图区"。原先直接挂在 flex-col 上，
+            // 父级高度是 auto → 百分比解析成 0，柱子一根都画不出来（只有数字浮着）。
+            <div key={b.from} className="flex h-full flex-1 flex-col items-center">
+              <span className="mb-1 text-xs tabular-nums text-slate-400">{b.count || ""}</span>
+              <div className="flex w-full flex-1 items-end">
+                <div
+                  className="w-full rounded-t bg-sky-500/70"
+                  style={{ height: `${Math.max(2, Math.round((b.count / maxCount) * 100))}%` }}
+                />
+              </div>
+              <span className="mt-1 text-xs tabular-nums text-slate-500">{b.from}%</span>
             </div>
           ))}
         </div>
@@ -211,7 +224,9 @@ function QuestionSlide({ slide, reveal }) {
   const total = options.reduce((n, o) => n + (Number(o.count) || 0), 0)
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+    // items-start：题面卡贴着内容高度（默认 stretch 会被右栏拉成一整条白板，
+    // 投出来是"一大片白，字只在最上面"）。题面长的时候它自然会长。
+    <div className="mx-auto grid max-w-7xl items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <section className="rounded-xl bg-white p-6 text-slate-900">
         <div className="mb-3 flex items-center gap-2 border-b pb-2">
           <span className="text-lg font-semibold tabular-nums">第 {slide.seq} 题</span>

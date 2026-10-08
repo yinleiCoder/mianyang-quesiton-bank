@@ -55,3 +55,25 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **跨页重复不落库**：预览页客户端算的，换视图看不到。**没有**改
   `import_save_page`（线上 5300 字的解析主链路），为一条提示改它风险不成比例。
   代价是它只是审核时的提示——而那正是它要起作用的地方。
+
+## 试卷导出 PDF（2026-10-08 完成）
+
+网页端能直接**下载**一份试卷 PDF（自己排版、内嵌字体），与原来的「浏览器打印 → 另存为」
+两条出口并存。方案与踩过的四颗雷写在 `docs/paper-pdf-export-design.md`，**改这块之前先读那份**。
+
+三条最容易复发的：
+
+- **卷面排版有两份实现**：`components/papers/paper-sheet.jsx`（网页/打印）与
+  `components/papers/paper-pdf-document.jsx`（react-pdf）。改一个必须改另一个，否则
+  下载到的 PDF 会慢慢和网页上看到的不是同一张纸。
+- **字体里 U+002D 的字宽是 0**（`scripts/build-cjk-subset.mjs` 故意做的，为了让断行处
+  引擎自动插的连字符隐形）。所以正文里的连字符必须走 `printableText()` 换成 U+2011，
+  直接写 `-` 会印不出来。
+- **`render` 回调 + `lineHeight` = 文字消失**（页脚踩过）。页脚只能挂在 Page 直下，
+  Page 上不能写 lineHeight（行距挂在正文包装层）。
+- **取图要用 `mediaUrl(key, { raw: true })`**，不能直接用默认档：默认档会转 webp，
+  而 react-pdf 不认 webp，整份导出会挂（不是那一张图降级）。`lib/pdf-prep.js` 另外按
+  魔术字节嗅探兜底，认不出来的图退化成一行说明文字。
+
+自检：`npm run test:pdf`（在 node 里渲染真 PDF 再用 pdfjs 抽回文字核对，37 项断言）；
+浏览器端用 `/dev-pdf-export` 与 `/dev-approval-flow` 两个夹具页（都不需要登录）。
