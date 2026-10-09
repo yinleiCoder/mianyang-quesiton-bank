@@ -22,10 +22,13 @@ export const metadata = { title: "组卷库" }
 
 const PAGE_SIZE = 20
 
-// 能不能删：与 delete_paper_draft 的断言同一条 —— 只有"从没提交过审核"的纯草稿。
-// 列表给的是**最新**那一版：草稿且还是第 1 版，说明这份卷子从建出来到现在没提交过；
-// 一旦提交过（在审/退回/已撤回/已入库），状态就不再是 draft，或版本号已经 > 1。
-const canDeletePaper = (p) => p.status === "draft" && Number(p.version_no) === 1
+// 能不能删：**判据只有服务端那一份**（0091）—— 没人考过、没有在审任务。
+// 列表接口直接给 `deletable`，界面照画按钮就行：拿 status/version_no 去猜是猜不出来的
+// （它们说明不了"有没有人考过"）。
+//
+// 那个 `??` 是给**迁移还没落库**的环境兜底的（0091 在新环境里可能还没跑）：
+// 拿不到 deletable 时退回旧口径（纯草稿），至少不会给出一个点了必然被拒的按钮。
+const canDeletePaper = (p) => p.deletable ?? (p.status === "draft" && Number(p.version_no) === 1)
 
 export default async function PapersPage({ searchParams }) {
   const sp = (await searchParams) ?? {}
@@ -192,9 +195,8 @@ export default async function PapersPage({ searchParams }) {
               <div className="min-w-0 flex-1">
                 <PaperCard paper={p} ownerView={tab === "mine"} />
               </div>
-              {/* 只有"从没提交过的纯草稿"给删除入口：这条判据与详情页、与
-                  delete_paper_draft 里的断言是同一条。全部试卷页签里都是已入库的卷子，
-                  不可能是这个状态，所以那边自然不会出现按钮 */}
+              {/* 删除入口：判据来自服务端（见 canDeletePaper）。"全部试卷"页签里都是已入库的卷子，
+                  但其中没人考过的照样可以删 */}
               {canDeletePaper(p) && <PaperDeleteButton paperId={p.paper_id} title={p.title} />}
             </div>
           ))}

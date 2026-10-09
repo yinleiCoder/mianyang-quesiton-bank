@@ -76,6 +76,17 @@ export default async function PaperDetailPage({ params }) {
     .eq("paper_id", id)
     .in("status", ["draft", "pending_group", "pending_city", "returned"])
 
+  // 能不能删（决定「删除」出不出现）。判据与服务端 delete_paper 的断言同一条（0091）：
+  // **有没有人考过** + 有没有在审任务。RLS 对作者放行本卷的全部作答（is_paper_grader 含 creator），
+  // 所以这里数得准；真正拦人的仍是 RPC 里的断言与 exam_attempts 的 ON DELETE RESTRICT。
+  // 拿版本状态去猜是不行的：入库了但没人考过的卷子，正是旧判据误伤的那一类。
+  const { count: attemptCount } = await supabase
+    .from("exam_attempts")
+    .select("id", { count: "exact", head: true })
+    .eq("paper_id", id)
+  const inFlightNow = (inFlight ?? 0) > 0 && snapshot.status !== "draft" && snapshot.status !== "returned"
+  const canDelete = isOwner && (attemptCount ?? 0) === 0 && !inFlightNow
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -151,7 +162,8 @@ export default async function PaperDetailPage({ params }) {
         status={snapshot.status}
         isOwner={isOwner}
         isTeacher={ctx.isTeacher}
-        hasInFlight={(inFlight ?? 0) > 0 && snapshot.status !== "draft" && snapshot.status !== "returned"}
+        hasInFlight={inFlightNow}
+        canDelete={canDelete}
         healthCount={health.size}
       />
 

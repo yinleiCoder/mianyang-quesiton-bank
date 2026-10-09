@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PencilIcon, SendIcon, UndoIcon, Trash2Icon, GitBranchIcon, RefreshCwIcon } from "lucide-react"
 
-export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, hasInFlight, healthCount }) {
+export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, hasInFlight, canDelete, healthCount }) {
   const router = useRouter()
   const supabase = createClient()
   const [busy, setBusy] = useState(false)
@@ -34,7 +34,8 @@ export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, h
   const canEdit = isTeacher && isOwner && (status === "draft" || status === "returned")
   const canSubmit = isTeacher && isOwner && (status === "draft" || status === "returned")
   const canRetract = isOwner && (status === "pending_group" || status === "pending_city")
-  const canDelete = isOwner && status === "draft"
+  // 能不能删由页面上算好传进来（判据在服务端：没人考过 + 没有在审任务，见 0091）。
+  // 这里不再自己拿 status 猜——旧口径"只有纯草稿能删"正是用户报的那个 bug。
   const canRevise = isTeacher && isOwner && status === "published" && !hasInFlight
 
   return (
@@ -109,13 +110,15 @@ export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, h
       )}
       {confirming === "delete" && (
         <ConfirmDialog
-          title="删除这份草稿试卷？"
-          description="删除后无法恢复。只有从未提交过审核的纯草稿才能删除。"
+          title="删除这份试卷？"
+          // 文案跟着判据走（0091 起是"没人考过 + 没有在审任务"，不再是"只有纯草稿"）。
+          // 说明里点名那两种情况：它们正是会失败的原因，先说清楚比点了再报错强。
+          description="删除后无法恢复。已有人考过、或正在审批中的试卷不能删除。"
           confirmText="删除"
           destructive
           busy={busy}
           onClose={() => setConfirming(null)}
-          onConfirm={() => call("delete_paper_draft", { p_paper_id: paperId }, "已删除", "/papers")}
+          onConfirm={() => call("delete_paper", { p_paper_id: paperId }, "已删除", "/papers")}
         />
       )}
     </div>

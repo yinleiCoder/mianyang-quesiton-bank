@@ -55,12 +55,17 @@ const DUP_LEVELS = [
 
 const dupLevel = (sim) => DUP_LEVELS.find((l) => sim >= l.min) ?? DUP_LEVELS[2]
 
+// ⚠ 每个 match 都收第二个参数 ctx（{ dups, crossPageDups }），**调用方必须传**：
+// 用 `view.filter(f.match)` 直接把函数交给 Array.filter 的话，第二个参数是数组下标，
+// 于是 `ctx.dups` 是 undefined —— 整页掉进错误边界（2026-10-08 实际发生）。
+// 两处调用都在下面写着，加过滤器时照抄。
 const FILTERS = [
   { key: "all", label: "全部", match: () => true },
   { key: "noanswer", label: "缺答案", match: (i) => needsAnswer(i) },
-  { key: "flagged", label: "有提示", match: (i, ctx) => i.flags.length > 0 || ctx?.crossPageDups.has(i.id) },
+  // 查重结果可能还没回来（dups 是异步的），所以访问一律空安全：缺上下文 = 这条不命中
+  { key: "flagged", label: "有提示", match: (i, ctx) => i.flags.length > 0 || (ctx?.crossPageDups?.has(i.id) ?? false) },
   // 只筛"值得看一眼"的两档；0.55~0.70 那一档是常态，筛出来反而干扰
-  { key: "dup", label: "疑似重复", match: (i, ctx) => (ctx?.dups.get(i.id)?.sim ?? 0) >= 0.70 },
+  { key: "dup", label: "疑似重复", match: (i, ctx) => (ctx?.dups?.get(i.id)?.sim ?? 0) >= 0.70 },
   { key: "imported", label: "已入库", match: (i) => i.status === "imported" },
   // 「不导入」必须能筛：叉掉之后就只剩这个入口能把它们找回来
   { key: "skipped", label: "不导入", match: (i) => i.status === "skipped" },
@@ -132,11 +137,6 @@ export function ImportPreview({ job, items, onRefresh }) {
     )
   }, [items, optimistic])
 
-  const list = useMemo(
-    () => view.filter((i) => FILTERS.find((f) => f.key === filter).match(i, { dups, crossPageDups })),
-    [view, filter, dups]
-  )
-
   // 跨页重复：同一份 PDF 里第 1 页和第 15 页出了同一道题。
   //
   // 同页重复在解析阶段就处理掉了（lib/import-pipeline.js 的 dup_in_job：保留先出现的、
@@ -149,6 +149,10 @@ export function ImportPreview({ job, items, onRefresh }) {
   //
   // 判据与 pipeline 逐字一致；比对范围是整个任务（含未勾选的），
   // 因为"要不要保留"正是审核人要判断的事，替他把候选藏起来反而添乱。
+  //
+  // ⚠ 这一段**必须排在下面那个 list 之前**：list 的过滤器要读它，而 `const` 是
+  // 暂存死区（TDZ）—— 写在后面就是每次渲染必抛 "Cannot access 'crossPageDups'
+  // before initialization"，整页掉进错误边界（2026-09-29 引入、2026-10-08 才发现）。
   const crossPageDups = useMemo(() => {
     const seen = new Set()
     const dupes = new Set()
@@ -159,6 +163,11 @@ export function ImportPreview({ job, items, onRefresh }) {
     }
     return dupes
   }, [items])
+
+  const list = useMemo(
+    () => view.filter((i) => FILTERS.find((f) => f.key === filter).match(i, { dups, crossPageDups })),
+    [view, filter, dups, crossPageDups]
+  )
 
   // 查重：一次问整个任务，而不是每道题问一次。
   // 服务端按 job 返回全部命中（item × 已发布题，>0.55），已按相似度降序，
@@ -310,7 +319,11 @@ export function ImportPreview({ job, items, onRefresh }) {
             }`}
           >
             {f.label}
-            <span className="ml-1 opacity-70">{view.filter(f.match).length}</span>
+            {/* 计数必须与上面的 list 用同一份上下文：漏传 ctx 时「疑似重复」会按 0 命中算，
+                数字和点进去看到的内容对不上 */}
+            <span className="ml-1 opacity-70">
+              {view.filter((i) => f.match(i, { dups, crossPageDups })).length}
+            </span>
           </button>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
