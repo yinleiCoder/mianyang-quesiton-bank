@@ -671,7 +671,15 @@ export function QuestionEditor({
           </div>
           <div className="space-y-1.5">
             <Label>知识点标签</Label>
-            <TagPicker value={d.tags} onChange={(tags) => set({ tags })} />
+            {/* 带上科目：候选只出该学科下的知识点，新建的也直接归到它下面（0096）。
+                传 nodes 是为了把"选定科目"展开成整棵子树——挂在父级学科上的知识点，
+                它下面的课程题目也该能选到。 */}
+            <TagPicker
+              value={d.tags}
+              onChange={(tags) => set({ tags })}
+              subjectNodeId={d.nodeId}
+              nodes={nodes}
+            />
           </div>
           {warn.length > 0 && (
             <div className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">

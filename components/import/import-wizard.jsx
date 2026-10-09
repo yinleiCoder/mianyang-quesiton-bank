@@ -365,7 +365,12 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">知识点标签（可后补）</Label>
-            <TagPicker value={tags} onChange={setTags} />
+            <TagPicker
+              value={tags}
+              onChange={setTags}
+              subjectNodeId={nodeId}
+              nodes={nodes}
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">默认难度</Label>

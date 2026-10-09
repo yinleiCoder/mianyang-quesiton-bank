@@ -6,26 +6,36 @@ import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
 import { TagsManager } from "@/components/admin/tags-manager"
 import { TAG_COLUMNS } from "@/lib/admin-tables"
+import { SUBJECT_NODE_COLUMNS } from "@/lib/subject-nodes"
 
-export const metadata = { title: "标签管理" }
+export const metadata = { title: "知识点管理" }
 
 export default async function AdminTagsPage() {
   const ctx = await requireUser()
   if (!ctx.isAdmin) {
-    return <AccessDenied title="仅系统管理员可访问" description="标签由教师自由创建；管理员负责合并重复、规范名称。" />
+    return <AccessDenied title="仅系统管理员可访问" description="知识点由教师自由创建；管理员负责指派学科、合并重复、规范名称。" />
   }
 
   const supabase = await createClient()
-  const { data: tags, error } = await supabase.from("tags").select(TAG_COLUMNS).order("name")
-  if (error) throw error
+  // 科目树随页面一起取：指派弹层要选节点，且列表里要把"挂在哪个学科"显示成人看得懂的名字。
+  const [tagsRes, nodesRes] = await Promise.all([
+    supabase.from("tags").select(TAG_COLUMNS).order("name"),
+    supabase
+      .from("subject_nodes")
+      .select(SUBJECT_NODE_COLUMNS)
+      .order("sort_order")
+      .order("name"),
+  ])
+  if (tagsRes.error) throw tagsRes.error
+  if (nodesRes.error) throw nodesRes.error
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="标签管理"
-        description="知识点标签由教师自由创建（忽略大小写去重）。合并后：在途版本跟随新名，已入库的历史版本保留打标签时的名称快照。"
+        title="知识点管理"
+        description="知识点由教师自由创建（同一学科、同一父级下不重名）。这里负责把它们指到所属学科、合并重复、规范名称——没指派学科的知识点不会出现在教师的候选里。合并后：在途版本跟随新名，已入库的历史版本保留打标签时的名称快照。"
       />
-      <TagsManager tags={tags ?? []} />
+      <TagsManager tags={tagsRes.data ?? []} nodes={nodesRes.data ?? []} />
     </div>
   )
 }

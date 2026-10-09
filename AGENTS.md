@@ -77,3 +77,24 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 自检：`npm run test:pdf`（在 node 里渲染真 PDF 再用 pdfjs 抽回文字核对，37 项断言）；
 浏览器端用 `/dev-pdf-export` 与 `/dev-approval-flow` 两个夹具页（都不需要登录）。
+
+## 教学动画空间（做过，2026-10-09 掐掉了）
+
+前后两版都撤了，**别再建**：
+
+1. 先做的是"教师在站内用 Remotion 写动画、浏览器渲染、走两级审批"（沙箱 + AI 写代码 +
+   esbuild 构建 + 三个 npm 包 + 一张源码表），做完 M0-M4 之后用户判断"制作放本站加大了复杂度"。
+2. 改成"上传视频 + 播放"之后，用户又决定**整个功能不要了**。
+
+代码、路由、侧栏入口、`PURPOSES.animation`、设计文档都已删除。
+**数据库里 `teaching_animations` / 它引用的那几张表和 OSS 上的视频还在**（删表不可逆，
+且删完 OSS 上的文件会变成孤儿），要清的话单独说。
+
+留两条将来若重做会立刻用到的结论（原设计文档已删，记在这里）：
+
+- **AI 生成的代码绝不能同源执行** —— `@supabase/ssr` 的会话 cookie **不是 httpOnly**
+  （浏览器端直接读写 `document.cookie`），任何同源脚本都能读走登录态。真要执行外部代码，
+  唯一可行的载体是 `sandbox="allow-scripts"` 的不透明源 iframe（不给 allow-same-origin）。
+- 那种 iframe 里 **CSP 的 `'self'` 不匹配**（规范明写），所以只能加载内联脚本；
+  `type="module"` 与 `fetch()` 全被 CORS 拦。而且里面 **`window.localStorage` 是抛异常、
+  不是 `undefined`**（`typeof` 也救不了）。

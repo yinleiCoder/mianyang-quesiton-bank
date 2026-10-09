@@ -109,7 +109,10 @@ export function BankFilters({ nodes, tags, value }) {
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">知识点标签</span>
+        {/* 说清"全部学科"：标签字典走 anon 缓存（lib/reference-data.js），
+            而 anon 的列级授权只有 (id, name)（0040），拿不到学科。
+            这里是题库的浏览筛选，平铺可用；出题侧才是需要学科隔离的地方（那边已收口）。 */}
+        <span className="text-xs text-muted-foreground">知识点标签（全部学科）</span>
         <select
           value={value.tag ?? ""}
           onChange={(e) => go({ tag: e.target.value })}

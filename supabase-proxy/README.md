@@ -209,3 +209,29 @@ grep SUPABASE_URL config/dev.json config/prod.local.json
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" https://www.cloudflare.com/   # Cloudflare 的 IP 还通不通
 ```
+
+## 解析被投毒（2026-10-09 实测到一次，与"掐 SNI"不是同一回事）
+
+**症状**：网站首页能打开（`myquiz.cn` 走 Vercel，正常），但**登录后立刻被弹回 `/login`**，
+或者浏览器里直接 `fetch('https://api.myquiz.cn/...')` 报 `Failed to fetch`。
+服务端表现为 `proxy.js` 的 `getClaims()` 返回 `fetch failed`。
+
+**判据（三条一起看，能把它与"SNI 被掐"分开）**：
+
+```bash
+# ① 系统解析给的是不是 Cloudflare —— 投毒时会给一个中国 IP（实测 103.73.220.77）
+node -e "require('dns').lookup('api.myquiz.cn',{all:true},(e,a)=>console.log(a))"
+
+# ② 握手回来的证书是不是自签的 —— 投毒时是 O=redirect-cnzz（那是国内的重定向页服务）
+echo | openssl s_client -connect api.myquiz.cn:443 -servername api.myquiz.cn 2>/dev/null | grep subject=
+
+# ③ 绕过解析、直接钉一个 Cloudflare IP —— 这时应当回 401（要 apikey）= 链路本身没坏
+curl -s -o /dev/null -w "%{http_code}\n" --resolve api.myquiz.cn:443:104.21.64.10 https://api.myquiz.cn/auth/v1/health
+```
+
+③ 通、①② 不对 → **故障在解析，不在 Worker**，改域名没用。
+
+**绕过**：本地开发用 `scripts/dev-dns-pin.cjs`（Node 侧）+ Chrome 的
+`--host-resolver-rules="MAP api.myquiz.cn 104.21.64.10"`（浏览器侧）。
+系统级做法是加一条 hosts，但要管理员权限，且**必须记得删**。
+它是时好时坏的，所以先等等再试往往也有效 —— 别在没确认是哪一类问题时就去改域名。

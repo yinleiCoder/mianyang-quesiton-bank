@@ -50,10 +50,10 @@ import {
   MapPinIcon,
   MessageSquareIcon,
   ScrollTextIcon,
+  SparklesIcon,
   TagsIcon,
   CircleUserRoundIcon,
   DownloadIcon,
-  SparklesIcon,
   UsersIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -150,7 +150,7 @@ function useNavItems(
     admin.push({ title: "班级管理", url: "/admin/classes", icon: UsersRoundIcon });
     if (isAdmin) {
       admin.push(
-        { title: "标签管理", url: "/admin/tags", icon: TagsIcon },
+        { title: "知识点管理", url: "/admin/tags", icon: TagsIcon },
         { title: "审批记录", url: "/admin/reviews", icon: ListChecksIcon },
         { title: "审计日志", url: "/admin/audit", icon: ScrollTextIcon },
         // 未处理条数由布局（服务端）传入，处理完 router.refresh() 会重算
