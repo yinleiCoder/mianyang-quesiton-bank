@@ -204,7 +204,7 @@ export function MaterialsManager({ rows, total, page, pageSize, nodes, caller })
             hasFilters
               ? "换个关键词或清掉筛选再看看。"
               : caller.isTeacher
-                ? "点右上角「上传资料」，PDF / Office / 图片 / 音视频都可以。"
+                ? "点右上角「上传资料」，PDF / Office / 图片 / 音视频 / zip 都可以。"
                 : "等老师上传后这里就会出现。"
           }
         />

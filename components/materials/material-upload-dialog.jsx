@@ -33,7 +33,7 @@ import { TreePicker } from "@/components/admin/tree-picker"
 import { FileIcon, Loader2Icon, UploadCloudIcon } from "lucide-react"
 
 // 说明文字分两半：尺寸那半句从真源生成，扩展名那半句手写（与 media-uploader.jsx 同一取舍）。
-const HINT_TAIL = "；pdf / word / excel / ppt / 图片 / 音视频 / txt / md / csv"
+const HINT_TAIL = "；pdf / word / excel / ppt / 图片 / 音视频 / txt / md / csv / zip"
 
 export function MaterialUploadDialog({ open, onOpenChange, nodes, onUploaded }) {
   const [title, setTitle] = useState("")

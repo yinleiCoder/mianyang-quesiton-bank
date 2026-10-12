@@ -98,3 +98,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 那种 iframe 里 **CSP 的 `'self'` 不匹配**（规范明写），所以只能加载内联脚本；
   `type="module"` 与 `fetch()` 全被 CORS 拦。而且里面 **`window.localStorage` 是抛异常、
   不是 `undefined`**（`typeof` 也救不了）。
+
+## 复习资料：zip 上传 + 下载按钮（2026-10-12）
+
+- **zip 只对资料区开放**（`lib/media-spec.js` 的 `MATERIAL_ONLY_TYPES`），题库附件那份清单里没有它。
+  三个 mime 必须都收——`application/zip`（macOS/Linux）、**`application/x-zip-compressed`
+  （Windows 上 Chrome/Edge 报的是这个）**、`application/x-zip`。少收一个，就成了"同一份压缩包
+  换个系统传不上来"，而报错只说"不支持该类型"，很难自查到是系统差异。
+- **下载走 `/api/materials/download`（302 到签名地址），不是直开 OSS 公网地址**：只有带签名的
+  请求 `response-content-disposition` 才生效，而它决定存下来的文件名是《标题.pdf》还是一串 uuid；
+  顺带在服务端把 download_count +1。**别改成"服务端转发一遍"**——单份上限 2GB，
+  那等于把全市的下载流量压在 Next 函数上（还白多一跳：OSS 在成都、函数在香港）。
+- ⚠ **OSS 子资源的值有两副面孔**：URL 里要 `encodeURIComponent` 之后的，**签名串里必须是原文**
+  （两处都编码 = SignatureDoesNotMatch，2026-10-12 实测才定下来）。见 `lib/oss-sign.mjs` 的 `ossSignedUrl`。
+  文件名口径（洗非法字符 + 用 objectKey 的扩展名补后缀）在 `lib/materials.js` 的 `materialFileName`，
+  与 Flutter 端 `material_brief.dart` 的 `suggestedFileName` 逐条一致，改一处要改另一处。
