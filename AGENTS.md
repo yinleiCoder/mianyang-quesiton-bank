@@ -113,3 +113,38 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   （两处都编码 = SignatureDoesNotMatch，2026-10-12 实测才定下来）。见 `lib/oss-sign.mjs` 的 `ossSignedUrl`。
   文件名口径（洗非法字符 + 用 objectKey 的扩展名补后缀）在 `lib/materials.js` 的 `materialFileName`，
   与 Flutter 端 `material_brief.dart` 的 `suggestedFileName` 逐条一致，改一处要改另一处。
+
+## 客户端下载页：Windows 走自家 OSS，安卓走 GitHub 镜像（2026-10-12）
+
+2026-10-12 在绵阳实测：GitHub release 资产 **20 秒拿不到一个字节**（HEAD 能过、正文取不到），
+同一时刻同一台机器上的自家成都 OSS 是 **7~9.6MB/s**。链接"正确"不等于下得动——学生看到的
+是一个永远转圈的下载按钮。所以 `/download` 改成两条线路并存。
+
+### ⚠ .apk 上不了 OSS，这是阿里云的规定不是 bug
+
+**阿里云不允许 `.apk` 从 OSS 默认域名（`*.aliyuncs.com`）对外分发**，实测回
+`400 ApkDownloadForbidden`，正文写着"please use CNAME instead"。同一批探测里
+`.zip` / `.exe` / `.pdf` / `.bin` 全是 200——**只有 .apk 被拦**。
+服务端代拉（node fetch）同样被拦，所以"用 Next 转发一遍"这条路也不通。
+
+于是：**exe/zip 走 OSS，APK 走第三方 GitHub 加速镜像**（用户 2026-10-12 拍板）：
+- 镜像地址写死在 `app/download/page.jsx` 的 `GITHUB_MIRROR`，换镜像只改这一行。
+- 走第三方意味着**理论上镜像方可以替换安装包**，所以页面上印了 SHA-256（默认收起的
+  `<details>`）。那个摘要来自 GitHub 官方 Release 的 digest，是逐字节核对过的
+  ——**别把它删了**，它是这条线路唯一的自证手段。
+- 想彻底摆脱第三方：给桶绑自定义域名后 APK 会自动改走 OSS（`--allow-apk` 重跑上传脚本即可，
+  `assetUrl` 是看清单里的 `mirrored` 字段决定的）。境外区域的桶绑域名不需要备案。
+
+### 资产名与上线顺序
+
+- **资产名两端逐字一致**（都不带版本号）：网页端 `app/download/page.jsx` 的
+  `APK_ASSET` / `WIN_SETUP_ASSET` / `WIN_ZIP_ASSET`，与客户端仓库
+  `mianyang_quiz/tool/upload_to_oss.mjs` 推上去的名字是同一套。改一处必须改另一处，
+  否则页面点下去是 404。
+- **上线顺序**：客户端打 tag → `release.yml` 的「镜像到阿里云 OSS」把 `assets/*` 推到
+  `client/` 并写一份 `client/latest.json` → 网页端 5 分钟内跟上（页面 revalidate 300）。
+  那一步需要客户端仓库配 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 两个 secret；
+  **没配不会让发布失败**，只是退回慢线路（页面的元数据顺序是
+  OSS 的 latest.json → GitHub API → 都没有就整块不渲染版本号）。
+- 补历史版本：本机跑 `node tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z` 即可，
+  脚本会跳过 .apk（并如实标 `mirrored:false`）、校验上传后的长度、写 latest.json。

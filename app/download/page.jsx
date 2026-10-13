@@ -35,51 +35,105 @@ export const metadata = {
 
 const REPO = "yinleiCoder/mianyang-quiz"
 const RELEASES = `https://github.com/${REPO}/releases`
-// 资产名固定（不带版本号），所以这几个链接长期有效
-const APK_URL = `${RELEASES}/latest/download/mianyang_quiz-android.apk`
+// 资产名固定（不带版本号），所以这几个链接长期有效。
 // Asset 名与客户端仓库流水线里的**逐字一致**（那边特意不带版本号）。
 // Windows 默认给**安装包**：双击装完，自动建桌面快捷方式，不需要管理员权限，
 // 也不用管 C 运行库（随包带着）。zip 留给需要绿色版的人，是次要入口。
+const APK_ASSET = "mianyang_quiz-android.apk"
 const WIN_SETUP_ASSET = "mianyang_quiz-windows-x64-setup.exe"
 const WIN_ZIP_ASSET = "mianyang_quiz-windows-x64.zip"
-const WIN_SETUP_URL = `${RELEASES}/latest/download/${WIN_SETUP_ASSET}`
-const WIN_ZIP_URL = `${RELEASES}/latest/download/${WIN_ZIP_ASSET}`
 
-// 最近一个 Release 的版本号与**它实际带了哪些资产**。
-// 取不到（还没发过版、或接口限流）就返回 null，页面照常显示，
-// 不因为一个装饰性字段把整页拖垮。
+// **两条线路：自家 OSS 优先，GitHub 只作备用。**
+// 2026-10-12 在绵阳实测：GitHub 的 release 资产 20 秒拿不到一个字节（HEAD 能过、正文取不到），
+// 同一时刻自家成都 OSS 7.2MB/s。链接正确不代表下得动——学生只会看到一个永远转圈的下载。
+// 客户端仓库的发布流水线把同一批资产推到 OSS（tool/upload_to_oss.mjs），
+// 资产名两边逐字一致，所以这里只是换个前缀。
+const OSS_HOST = process.env.NEXT_PUBLIC_OSS_PUBLIC_HOST
+const OSS_BASE = OSS_HOST ? `https://${OSS_HOST}/client` : null
+
+// 第三方 GitHub 加速镜像，给**上不了 OSS 的那一个资产**用（目前只有 .apk —— 阿里云不允许
+// .apk 从 OSS 默认域名对外分发，实测回 400 ApkDownloadForbidden）。
+// **它不是我们的基础设施**：可用性随时可能变，理论上也能替换文件。所以下面把 SHA-256
+// 印在页面上让人能自证——那个摘要来自 GitHub 官方 Release 的 digest，逐字节核对过。
+// 2026-10-12 实测：镜像 140~230KB/s（对照 GitHub 直连 20 秒 0 字节、自家 OSS 9.6MB/s）。
+// 想换镜像只改这一行；若哪天给桶绑了自定义域名，APK 也会自动走 OSS（见 assetUrl）。
+const GITHUB_MIRROR = "https://ghproxy.net/"
+
+/** 某个资产该走哪条线路：清单说它已在 OSS 上就用 OSS，否则走 GitHub 加速镜像。 */
+function assetUrl(name, release) {
+  return OSS_BASE && release?.mirrored?.has(name)
+    ? `${OSS_BASE}/${name}`
+    : `${GITHUB_MIRROR}${RELEASES}/latest/download/${name}`
+}
+
+// 最近一个 Release 的版本号、**它实际带了哪些资产**，以及该走哪条线路。
+// 取不到就返回 null，页面照常显示——不因为一个装饰性字段把整页拖垮。
 //
 // 为什么要看资产列表：安装包是后加的资产，**比它更早的 Release 里只有 zip**。
-// 而 `/releases/latest/download/<名字>` 在资产不存在时是 **404** ——
-// 不查就点，用户拿到的是一个死链（安装器那一步构建失败时也会出现这种情况）。
+// 而固定名的下载链接在资产不存在时是 **404** —— 不查就点，用户拿到的是一个死链
+//（安装器那一步构建失败时也会出现这种情况）。
 async function latestRelease() {
+  return (await ossRelease()) ?? (await githubRelease())
+}
+
+/** 首选：发布流水线写在 OSS 上的 client/latest.json（国内快）。 */
+async function ossRelease() {
+  if (!OSS_BASE) return null
+  try {
+    const res = await fetch(`${OSS_BASE}/latest.json`, { next: { revalidate: 300 } })
+    if (!res.ok) return null
+    const data = await res.json()
+    return { ...summarize(data.tag, data.publishedAt, data.assets), source: "oss" }
+  } catch {
+    return null
+  }
+}
+
+/** 兜底：GitHub API（权威但慢；OSS 清单还没写过的版本只能走这条）。 */
+async function githubRelease() {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       next: { revalidate: 300 },
     })
     if (!res.ok) return null
     const data = await res.json()
-    const names = new Set((data.assets ?? []).map((a) => a.name))
-    return {
-      tag: data.tag_name,
-      publishedAt: data.published_at,
-      hasSetup: names.has(WIN_SETUP_ASSET),
-      hasZip: names.has(WIN_ZIP_ASSET),
-    }
+    return { ...summarize(data.tag_name, data.published_at, data.assets), source: "github" }
   } catch {
     return null
   }
 }
 
+/** 两份来源（OSS 的 latest.json / GitHub 的 release JSON）字段名不同，在这里归一。 */
+function summarize(tag, publishedAt, assets) {
+  const list = assets ?? []
+  const names = new Set(list.map((a) => a.name))
+  // 摘要：GitHub 给的是 "sha256:…" 形式的 digest，OSS 清单里是裸的 sha256
+  const sha = (a) => (a.sha256 ?? a.digest?.replace(/^sha256:/, "") ?? "").toLowerCase()
+  return {
+    tag,
+    publishedAt,
+    hasSetup: names.has(WIN_SETUP_ASSET),
+    hasZip: names.has(WIN_ZIP_ASSET),
+    // 已经在自家 OSS 上的资产。**只认显式的 mirrored: true**：GitHub 那份清单没有这个字段
+    //（那边我们不知道 OSS 上有什么），于是全部落回 GitHub 线路——正是想要的保守行为。
+    // 目前只有 .apk 是这条：阿里云不允许它从 OSS 默认域名分发（见 AGENTS.md 与
+    // 客户端仓库 tool/upload_to_oss.mjs），清单里标记 mirrored:false。
+    mirrored: new Set(list.filter((a) => a.mirrored === true).map((a) => a.name)),
+    // 文件摘要，给"要不要信这个安装包"用（走第三方镜像时尤其需要）
+    sha256: new Map(list.filter((a) => sha(a)).map((a) => [a.name, sha(a)])),
+  }
+}
+
 /// Windows 主按钮该指向哪：优先安装包，退而求其次压缩包，再不行去 Release 页自己找。
 ///
-/// **查不到资产列表时（release 为 null）选 zip**：那说明接口挂了或被限流，
+/// **查不到资产列表时（release 为 null）选 zip**：那说明清单挂了或被限流，
 /// 而 zip 是历来每个版本都有、几乎不会缺的那个。宁可给用户一个能用的旧形态，
 /// 也不要赌一个可能 404 的链接。
 function windowsDownload(release) {
-  if (!release) return { url: WIN_ZIP_URL, setup: false }
-  if (release.hasSetup) return { url: WIN_SETUP_URL, setup: true }
-  if (release.hasZip) return { url: WIN_ZIP_URL, setup: false }
+  const url = (name) => assetUrl(name, release)
+  if (!release) return { url: url(WIN_ZIP_ASSET), setup: false }
+  if (release.hasSetup) return { url: url(WIN_SETUP_ASSET), setup: true }
+  if (release.hasZip) return { url: url(WIN_ZIP_ASSET), setup: false }
   return { url: RELEASES, setup: false }
 }
 
@@ -95,6 +149,10 @@ const FEATURES = [
 export default async function DownloadPage() {
   const release = await latestRelease()
   const win = windowsDownload(release)
+  const apkUrl = assetUrl(APK_ASSET, release)
+  const zipUrl = assetUrl(WIN_ZIP_ASSET, release)
+  // 安卓包走的是第三方加速镜像，把摘要摆出来让人能自证（见 GITHUB_MIRROR 的注释）
+  const apkSha = release?.sha256?.get(APK_ASSET) ?? ""
 
   return (
     <div className="relative flex min-h-svh flex-1 flex-col bg-muted/40">
@@ -150,13 +208,24 @@ export default async function DownloadPage() {
               <Button
                 className="w-full"
                 nativeButton={false}
-                render={<a href={APK_URL} />}
+                render={<a href={apkUrl} />}
               >
                 <DownloadIcon className="size-4" /> 下载 APK
               </Button>
               <p className="text-xs text-muted-foreground">
                 首次安装需在系统设置里允许「安装未知来源应用」。
               </p>
+              {/* 安卓包经过第三方加速镜像，摘要摆出来让人能自证；默认收起，不打扰多数人 */}
+              {apkSha && (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="w-fit cursor-pointer select-none">
+                    文件校验（SHA-256）
+                  </summary>
+                  <code className="mt-1 block break-all font-mono text-[10px] leading-relaxed">
+                    {apkSha}
+                  </code>
+                </details>
+              )}
             </CardContent>
           </Card>
 
@@ -188,7 +257,7 @@ export default async function DownloadPage() {
                   <p className="text-xs text-muted-foreground">
                     免安装版：
                     <a
-                      href={WIN_ZIP_URL}
+                      href={zipUrl}
                       className="underline underline-offset-2 hover:text-foreground"
                     >
                       下载压缩包
