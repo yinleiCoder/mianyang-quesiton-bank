@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,7 +29,6 @@ import {
   kindLabel,
   scopeLabel,
   KIND_LABELS,
-  subjectNodesQuery,
 } from "@/lib/subject-nodes"
 import {
   GitBranchIcon,
@@ -238,21 +238,22 @@ function ScopePane({ scope, trees, onOpenDialog, onFreeze }) {
   )
 }
 
-export function TreeManager({ nodes }) {
-  // 数据自管理：初始值由服务端传入（SSR 首屏），每次操作成功后用浏览器端
-  // 客户端重查全量节点刷新本地状态——不依赖 router.refresh，保证立即显示。
-  const [list, setList] = useState(nodes)
+export function TreeManager({ nodes, onChanged }) {
+  // 数据由 TreeViews 持有（nodes 是那份活数据，onChanged 请它重查一次）——
+  // 不在这里自己存一份：视图一切换组件就重建，本地副本会落回页面那一次查询的旧树。
   const [busy, setBusy] = useState(false)
-  const trees = useMemo(() => buildTrees(list), [list])
-  const hasAny = list.length > 0
+  const trees = useMemo(() => buildTrees(nodes), [nodes])
+  const hasAny = nodes.length > 0
 
   // 动作：{ type, node?, scope?, name?, value }
   const [action, setAction] = useState(null)
   const [name, setName] = useState("")
 
-  async function refreshList() {
-    const { data } = await subjectNodesQuery(createClient(), { sorted: true })
-    if (data) setList(data)
+  // 写成功后：先让本页重查（列表/画布立刻看到），再喊服务端一声把参考数据缓存作废 ——
+  // 出题、题库、班级那些页面靠的是后者（见 lib/actions/reference.js）。
+  async function afterWrite() {
+    await onChanged()
+    refreshReferenceQuietly("subjectNodes")
   }
 
   async function run(fn, params, msg) {
@@ -265,7 +266,7 @@ export function TreeManager({ nodes }) {
       return false
     }
     toast.success(msg)
-    await refreshList()
+    await afterWrite()
     return true
   }
 
@@ -393,7 +394,7 @@ export function TreeManager({ nodes }) {
         <DeleteNodeDialog
           node={action.node}
           onClose={() => setAction(null)}
-          onDeleted={refreshList}
+          onDeleted={afterWrite}
         />
       )}
     </div>

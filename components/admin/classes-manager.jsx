@@ -1,7 +1,8 @@
 "use client"
 
 // 班级的增改停用。与 schools-manager / tree-manager 同形：浏览器端直接调 RPC，成功后 router.refresh()
-// 让服务端重查（不在这里维护一份本地副本 —— 班级的权威副本在服务端）。
+// 让服务端重查（不在这里维护一份本地副本 —— 班级的权威副本在服务端），
+// 同时喊服务端作废参考数据缓存（注册页读的是另一份，router.refresh() 管不到它）。
 //
 // 批量归班**不在这里**：那是「学生名册」上的操作（/students?unassigned=1 选中若干人 → 分配到班级），
 // 复用同一张名册表，不必在这个页面再写一套选人 UI。
@@ -10,6 +11,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { gradeLabel } from "@/lib/students"
 import { nodePathOf } from "@/lib/subject-nodes"
 import { Button } from "@/components/ui/button"
@@ -82,6 +84,9 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
       setCreating(false)
       setEditing(null)
       setToggling(null)
+      // 注册页（选班级）与学生管理读的是服务端缓存里的班级名单，写完必须喊一声
+      //（见 lib/actions/reference.js）。router.refresh() 只刷新本页，管不到那份缓存。
+      refreshReferenceQuietly("classes")
       router.refresh()
     } catch (e) {
       toast.error(e?.message ?? "操作失败")

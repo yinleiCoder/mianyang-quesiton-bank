@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { EmptyState } from "@/components/empty-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -84,6 +85,9 @@ export function TagsManager({ tags: initialTags, nodes = [] }) {
     }
     toast.success(msg)
     await refreshList()
+    // 题库 /bank 的筛选条、题目编辑器读的是服务端缓存里的标签字典，写完必须喊一声
+    //（见 lib/actions/reference.js）
+    refreshReferenceQuietly("tags")
     return true
   }
 

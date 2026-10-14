@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { EmptyState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -70,6 +71,13 @@ export function SchoolsManager({ schools, cities }) {
     if (data) setList(data)
   }
 
+  // 写成功后：本页重查 + 喊服务端作废学校名单缓存。注册页、用户管理读的都是服务端那份，
+  // 不喊一声就要等 TTL（见 lib/actions/reference.js）。
+  async function afterWrite() {
+    await refreshList()
+    refreshReferenceQuietly("schools")
+  }
+
   async function handleCreate(e) {
     e.preventDefault()
     setCreating(true)
@@ -88,7 +96,7 @@ export function SchoolsManager({ schools, cities }) {
     setName("")
     setCode("")
     setCityId(null)
-    await refreshList()
+    await afterWrite()
   }
 
   async function handleToggle(school) {
@@ -105,7 +113,7 @@ export function SchoolsManager({ schools, cities }) {
       return
     }
     toast.success(school.is_active ? "已停用" : "已启用")
-    await refreshList()
+    await afterWrite()
   }
 
   async function handleMove() {
@@ -123,7 +131,7 @@ export function SchoolsManager({ schools, cities }) {
     }
     toast.success(`「${moving.name}」已改到${cityLabel(cities, moveCityId)}`)
     setMoving(null)
-    await refreshList()
+    await afterWrite()
   }
 
   // 没有市就建不了学校（admin_create_school 要求指定市）。先指向建市页，

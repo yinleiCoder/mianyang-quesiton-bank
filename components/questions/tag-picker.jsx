@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { createFuse, searchFuse } from "@/lib/fuzzy"
 import { useDebounced } from "@/lib/use-debounced"
 import { tagIndex, tagsInScope, TAG_FULL_COLUMNS } from "@/lib/tag-tree"
@@ -97,6 +98,9 @@ export function TagPicker({
     const tag = { id, name: q.trim(), subject_node_id: subjectNodeId, parent_id: null }
     setAll((prev) => (prev ? [...prev, tag] : [tag]))
     addExisting(tag)
+    // 本页候选池已就地补上，但题库 /bank 的筛选条与标签管理页读的是服务端那份缓存，
+    // 得喊一声（见 lib/actions/reference.js）
+    refreshReferenceQuietly("tags")
   }
 
   const onKeyDown = (e) => {

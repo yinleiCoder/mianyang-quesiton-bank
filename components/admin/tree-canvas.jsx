@@ -9,13 +9,13 @@
 // 三条与列表视图共用同一份真源，别在这里另立一套：
 //   · 谁能当谁的父节点 —— lib/subject-nodes.js 的 childKinds（界面按它决定"能不能放"）；
 //   · 真正危险的守卫（成环 / 跨目录 / 自己挂自己）在 SQL 里（admin_move_subject_node）；
-//   · 数据与刷新 —— nodes 由页面传进来，改完 router.refresh()，不在这里本地改树。
+//   · 数据与刷新 —— nodes 由 TreeViews 传进来（它持有那份活数据），搬移成功后
+//     调 onChanged() 请它重查 + 喊服务端作废参考数据缓存，不在这里本地改树。
 //
 // 布局是自己算的（tidy tree：叶子顺次排开、父节点居中于子节点），不引 dagre：
 // 需求只是"看上去是一棵树"，为此多一个布局库不值当。
 
-import { useCallback, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   ReactFlow,
@@ -29,6 +29,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { createClient } from "@/lib/supabase/client"
+import { refreshReferenceQuietly } from "@/lib/reference-refresh"
 import { childKinds, indexNodes, kindLabel, scopeLabel } from "@/lib/subject-nodes"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 
@@ -93,20 +94,28 @@ function layoutTree(nodes) {
   return out
 }
 
-function Canvas({ nodes: rawNodes }) {
-  const router = useRouter()
+function Canvas({ nodes: rawNodes, onChanged }) {
   const byId = useMemo(() => new Map((rawNodes ?? []).map((n) => [n.id, n])), [rawNodes])
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(useMemo(() => layoutTree(rawNodes ?? []), [rawNodes]))
-  const [edges, , onEdgesChange] = useEdgesState(
-    useMemo(
-      () =>
-        (rawNodes ?? [])
-          .filter((n) => n.parent_id)
-          .map((n) => ({ id: `${n.parent_id}-${n.id}`, source: n.parent_id, target: n.id, type: "smoothstep" })),
-      [rawNodes]
-    )
+  const layout = useMemo(() => layoutTree(rawNodes ?? []), [rawNodes])
+  const links = useMemo(
+    () =>
+      (rawNodes ?? [])
+        .filter((n) => n.parent_id)
+        .map((n) => ({ id: `${n.parent_id}-${n.id}`, source: n.parent_id, target: n.id, type: "smoothstep" })),
+    [rawNodes]
   )
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(layout)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(links)
+
+  // useNodesState / useEdgesState 就是 useState，**不会跟着 props 走**（@xyflow/react 12）：
+  // 树数据一换（搬移成功后 onChanged 带来的新一份），必须自己把节点与连线重新灌进去，
+  // 否则节点停在拖动落点、连线还挂在旧父节点上。拖动过程中 rawNodes 不变，不会打架。
+  useEffect(() => {
+    setNodes(layout)
+    setEdges(links)
+  }, [layout, links, setNodes, setEdges])
 
   const [draggingId, setDraggingId] = useState(null)
   const [pending, setPending] = useState(null) // {node, target} —— 等确认的搬移
@@ -182,7 +191,10 @@ function Canvas({ nodes: rawNodes }) {
     }
     toast.success(`「${pending.node.name}」已移到「${pending.target.name}」下`)
     setPending(null)
-    router.refresh()
+    // 先重查（本页的节点与连线跟着换），再喊服务端作废参考数据缓存 —— 出题、题库、班级
+    // 那些页面靠的是后者（见 lib/actions/reference.js）
+    await onChanged()
+    refreshReferenceQuietly("subjectNodes")
   }
 
   return (
@@ -229,10 +241,10 @@ function Canvas({ nodes: rawNodes }) {
   )
 }
 
-export function TreeCanvas({ nodes }) {
+export function TreeCanvas({ nodes, onChanged }) {
   return (
     <ReactFlowProvider>
-      <Canvas nodes={nodes} />
+      <Canvas nodes={nodes} onChanged={onChanged} />
     </ReactFlowProvider>
   )
 }
