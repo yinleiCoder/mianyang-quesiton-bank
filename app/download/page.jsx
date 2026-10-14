@@ -81,10 +81,17 @@ async function ossRelease() {
   if (!OSS_BASE) return null
   try {
     const res = await fetch(`${OSS_BASE}/latest.json`, { next: { revalidate: 300 } })
-    if (!res.ok) return null
+    if (!res.ok) {
+      // 退回 GitHub 是对的，但**必须留痕**：这里原先是静默 return null，
+      // 于是 2026-10-14 那次「取不到清单」在日志里一个字都没有，
+      // 只能靠"页面上的版本号对不上"反推，查了很久。
+      console.error(`[download] OSS 清单响应 ${res.status}，本次退回 GitHub 线路`)
+      return null
+    }
     const data = await res.json()
     return { ...summarize(data.tag, data.publishedAt, data.assets), source: "oss" }
-  } catch {
+  } catch (err) {
+    console.error(`[download] OSS 清单取不到（${err?.message ?? err}），退回 GitHub 线路`)
     return null
   }
 }
@@ -95,10 +102,14 @@ async function githubRelease() {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       next: { revalidate: 300 },
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.error(`[download] GitHub Release 也取不到（${res.status}），版本号整块不渲染`)
+      return null
+    }
     const data = await res.json()
     return { ...summarize(data.tag_name, data.published_at, data.assets), source: "github" }
-  } catch {
+  } catch (err) {
+    console.error(`[download] GitHub Release 请求失败（${err?.message ?? err}），版本号整块不渲染`)
     return null
   }
 }
