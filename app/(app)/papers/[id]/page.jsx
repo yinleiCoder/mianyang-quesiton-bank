@@ -69,6 +69,22 @@ export default async function PaperDetailPage({ params }) {
   const chip = paperStatusChip(snapshot.status)
   const isOwner = paper.creator_id === ctx.user?.id
 
+  // 卷面题目的可用性分三类，别混成一句"题库有变化"：
+  //   · 未入库：AI 一键成卷的草稿 / 在审版本 —— 要先去提交审核，刷新也刷不动；
+  //   · 已下线/不存在：没有可替换的版本，只能从卷面移除；
+  //   · 题库有新版本：已入库但旧版，点「刷新题目」即可。
+  const items = snapshot.items ?? []
+  const unavailable = items.filter((i) => {
+    if (i.available !== false) return false
+    // 已下线/已删除的走下面那条红色横幅，别在这里重复计数
+    const problem = health.get(i.id)
+    return problem !== "offline" && problem !== "missing"
+  })
+  const staleItems = items.filter((i) => i.available !== false && i.stale)
+  const missingOrOffline = [...health.entries()].filter(([, p]) => p === "offline" || p === "missing")
+  // 只要有一道不可用，提交就会被服务端拒（未入库/已下线都算）
+  const blockedCount = items.filter((i) => i.available === false).length
+
   // 是否还有在流版本（决定「发起改版」能不能点）
   const { count: inFlight } = await supabase
     .from("paper_versions")
@@ -164,29 +180,65 @@ export default async function PaperDetailPage({ params }) {
         isTeacher={ctx.isTeacher}
         hasInFlight={inFlightNow}
         canDelete={canDelete}
-        healthCount={health.size}
+        // 只有"已入库但旧版"的题能靠 paper_refresh_items 修；未入库/已下线的不行
+        healthCount={staleItems.length}
+        blockedCount={blockedCount}
       />
 
-      {health.size > 0 && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      {unavailable.length > 0 && (
+        <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900">
           <p className="flex items-center gap-1.5 font-medium">
             <AlertTriangleIcon className="size-4" />
-            有 {health.size} 道题在题库里发生了变化
+            有 {unavailable.length} 道题还没入库或版本已失效，这份试卷暂时不能提交
+          </p>
+          <p className="mt-1 text-xs">
+            AI 一键成卷生成的是题目草稿；需要先在「我的题目」里提交审核，
+            题目入库后回到这里点「刷新题目」再提交试卷。
+          </p>
+          {isOwner && (snapshot.status === "draft" || snapshot.status === "returned") && (
+            <Button
+              className="mt-2"
+              size="sm"
+              variant="outline"
+              nativeButton={false}
+              render={<Link href={`/papers/edit/${versionId}`} />}
+            >
+              去编辑器处理
+            </Button>
+          )}
+        </div>
+      )}
+
+      {missingOrOffline.length > 0 && (
+        <div className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangleIcon className="size-4" />
+            有 {missingOrOffline.length} 道题已下线或已不存在
           </p>
           <ul className="mt-1 text-xs">
-            {[...health.entries()].slice(0, 6).map(([itemId, problem]) => {
-              const item = (snapshot.items ?? []).find((i) => i.id === itemId)
+            {missingOrOffline.slice(0, 6).map(([itemId, problem]) => {
+              const item = items.find((i) => i.id === itemId)
               return (
                 <li key={itemId}>
                   第 {item?.seq ?? "?"} 题：{HEALTH_LABEL[problem] ?? problem}
                 </li>
               )
             })}
-            {health.size > 6 && <li>……还有 {health.size - 6} 道</li>}
+            {missingOrOffline.length > 6 && <li>……还有 {missingOrOffline.length - 6} 道</li>}
           </ul>
+          <p className="mt-1 text-xs">这些题没有可替换的入库版本，请先从卷面移除。</p>
+        </div>
+      )}
+
+      {staleItems.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangleIcon className="size-4" />
+            有 {staleItems.length} 道题在题库里有新版本
+          </p>
           <p className="mt-1 text-xs">
-            已入库的试卷不会因为题库改版而改变（它引用的是定稿时的版本），
-            这里只是提醒你这几道题在题库里有更新。发起改版时会自动换成最新版本。
+            已入库的试卷不会因为题库改版而改变（它引用的是定稿时的版本）。
+            草稿或被退回的试卷点「刷新题目」即可换到最新版本。
           </p>
         </div>
       )}

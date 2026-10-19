@@ -28,6 +28,7 @@ import {
   itemFromBank,
 } from "@/lib/paper-editor-state"
 import { paperIssues } from "@/lib/paper-model"
+import { bulkResultMessage, progressReporter, runEachRpc } from "@/lib/bulk-rpc"
 import { qtypeShortLabel } from "@/lib/question-model"
 import { paperStatusChip } from "@/lib/paper-workbench"
 import { QuestionPicker } from "@/components/papers/question-picker"
@@ -53,6 +54,9 @@ export function PaperEditor({ initialSnapshot, nodes }) {
   const [saving, setSaving] = useState(false)
   // 拖拽中要渲染 DragOverlay，得记住被拖的是哪一条
   const [activeRow, setActiveRow] = useState(null)
+  // 「把卷面上未入库的题一键提交审核」的进度与本轮已提交数
+  const [submittingQuestions, setSubmittingQuestions] = useState(null)
+  const [submittedQuestions, setSubmittedQuestions] = useState(0)
 
   const view = useMemo(() => buildView(state), [state])
   const issues = useMemo(
@@ -62,6 +66,28 @@ export function PaperEditor({ initialSnapshot, nodes }) {
         target_score: view.target,
       }),
     [view]
+  )
+
+  // 卷面上"还没入库"的题目。按 question_version_id 去重（同一道题可能被放了两次），
+  // 这些就是 AI 一键成卷产生的题库草稿——试卷提交要求它们先走完两级审核。
+  const pendingQuestions = useMemo(() => {
+    const seen = new Set()
+    const out = []
+    for (const sec of view.sections) {
+      for (const it of sec.items) {
+        if (it.available !== false) continue
+        const vid = it.question_version_id
+        if (!vid || seen.has(vid)) continue
+        seen.add(vid)
+        out.push({ versionId: vid, seq: it.seq })
+      }
+    }
+    return out
+  }, [view])
+  // 未入库的题单独用一条横幅讲（带提交入口），这里不再重复同一句"尚未入库"
+  const visibleIssues = useMemo(
+    () => (pendingQuestions.length > 0 ? issues.filter((m) => !m.includes("尚未入库")) : issues),
+    [issues, pendingQuestions.length]
   )
   const existingIds = useMemo(
     () => new Set(state.sections.flatMap((s) => s.items.map((i) => i.question_id))),
@@ -141,6 +167,65 @@ export function PaperEditor({ initialSnapshot, nodes }) {
     toast.success("已提交审核")
     router.push(`/papers/${state.paperId}`)
   }, [issues, save, supabase, state.versionId, state.paperId, router])
+
+  // 把卷面上未入库的题逐条提交审核。AI 一键成卷后这是最自然的下一步：
+  // 老师不用去「我的题目」里从几百道草稿里找这几十道。
+  // 逐条走 submit_question（与「我的题目」同一个 RPC），失败只影响它自己。
+  const submitPendingQuestions = useCallback(async () => {
+    if (submittingQuestions || pendingQuestions.length === 0) return
+    setSubmittingQuestions({ done: 0, total: pendingQuestions.length })
+    try {
+      // 先看真实状态：已经在审的不能再提交（submit_question 会报状态非法），
+      // 也能顺带说清楚"为什么没提交"。
+      const ids = pendingQuestions.map((q) => q.versionId)
+      const { data, error } = await supabase
+        .from("question_versions")
+        .select("id,status")
+        .in("id", ids)
+      if (error) {
+        toast.error(`题目状态没取回来：${error.message}`)
+        return
+      }
+      const rows = data ?? []
+      const submittable = rows
+        .filter((v) => v.status === "draft" || v.status === "returned")
+        .map((v) => v.id)
+      const inReview = rows.filter(
+        (v) => v.status === "pending_group" || v.status === "pending_city"
+      ).length
+      const unreachable = ids.length - rows.length
+      if (submittable.length === 0) {
+        const why = [
+          inReview > 0 ? `${inReview} 道已在审核中` : null,
+          unreachable > 0 ? `${unreachable} 道不是你的题或已不可读` : null,
+        ].filter(Boolean)
+        toast.info(
+          `没有可提交的草稿题${why.length ? `（${why.join("，")}）` : ""}。` +
+            `审核通过后点「刷新题目」再提交试卷。`,
+          { duration: 9000 }
+        )
+        return
+      }
+      setSubmittingQuestions({ done: 0, total: submittable.length })
+      const { ok, failed } = await runEachRpc(
+        submittable,
+        (versionId) => supabase.rpc("submit_question", { p_version_id: versionId }),
+        progressReporter(setSubmittingQuestions)
+      )
+      setSubmittedQuestions((n) => n + ok)
+      const msg = bulkResultMessage("提交审核", ok, failed)
+      if (ok > 0) {
+        toast.success(msg, { duration: 6000 })
+        toast.info("等这些题通过两级审核入库后，点「刷新题目」或重新打开本页，再提交试卷。", {
+          duration: 9000,
+        })
+      } else {
+        toast.error(msg, { duration: 9000 })
+      }
+    } finally {
+      setSubmittingQuestions(null)
+    }
+  }, [pendingQuestions, submittingQuestions, supabase])
 
   const refreshItems = useCallback(async () => {
     if (state.dirty && !(await save({ silent: true }))) return
@@ -236,7 +321,13 @@ export function PaperEditor({ initialSnapshot, nodes }) {
           <span className={`ml-2 rounded px-1.5 py-0.5 text-xs font-normal ${chip.cls}`}>{chip.text}</span>
           {state.dirty && <span className="ml-2 text-xs font-normal text-amber-600">有未保存的改动</span>}
         </h1>
-        <Button variant="outline" size="sm" onClick={refreshItems}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={refreshItems}
+          disabled={pendingQuestions.length > 0}
+          title={pendingQuestions.length > 0 ? "还有题没入库，刷新会失败；先把这些题提交审核" : ""}
+        >
           <RefreshCwIcon className="size-4" /> 刷新题目
         </Button>
         <Button
@@ -253,11 +344,46 @@ export function PaperEditor({ initialSnapshot, nodes }) {
         </Button>
       </div>
 
-      {issues.length > 0 && (
+      {/* 未入库的题单独说：这不是"去题库补个字段"能解决的，必须走审核链。
+          给一个一键提交入口，否则老师只能去「我的题目」几百条草稿里逐道找。 */}
+      {pendingQuestions.length > 0 && (
+        <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+          <p className="font-medium">这 {pendingQuestions.length} 道题还没入库，试卷暂时不能提交</p>
+          <p className="mt-0.5">
+            AI 一键成卷生成的是题库草稿；试卷只能引用已入库的题目。先把它们提交审核，
+            两级审核通过后再点「刷新题目」或重新打开本页。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={submitPendingQuestions}
+              disabled={!!submittingQuestions}
+            >
+              {submittingQuestions
+                ? `提交中 ${submittingQuestions.done}/${submittingQuestions.total}`
+                : `一键提交这 ${pendingQuestions.length} 道题审核`}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href="/questions?status=draft" />}
+            >
+              去「我的题目」看草稿
+            </Button>
+            {submittedQuestions > 0 && (
+              <span className="text-sky-800">已提交 {submittedQuestions} 道，等待审核通过</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {visibleIssues.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <p className="font-medium">提交前还需处理 {issues.length} 项：</p>
+          <p className="font-medium">提交前还需处理 {visibleIssues.length} 项：</p>
           <ul className="mt-1 list-inside list-disc space-y-0.5">
-            {issues.slice(0, 4).map((m, i) => (
+            {visibleIssues.slice(0, 4).map((m, i) => (
               <li key={i}>{m}</li>
             ))}
           </ul>

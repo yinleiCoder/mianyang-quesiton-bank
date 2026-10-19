@@ -11,7 +11,19 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PencilIcon, SendIcon, UndoIcon, Trash2Icon, GitBranchIcon, RefreshCwIcon } from "lucide-react"
 
-export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, hasInFlight, canDelete, healthCount }) {
+export function PaperActions({
+  paperId,
+  versionId,
+  status,
+  isOwner,
+  isTeacher,
+  hasInFlight,
+  canDelete,
+  healthCount,
+  // 卷面上不可用的题（未入库的 AI 草稿 / 已下线 / 已删除）：提交按钮先禁用，
+  // 避免点了才被服务端拒
+  blockedCount = 0,
+}) {
   const router = useRouter()
   const supabase = createClient()
   const [busy, setBusy] = useState(false)
@@ -48,7 +60,12 @@ export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, h
       {canSubmit && (
         <Button
           variant="outline"
-          disabled={busy}
+          disabled={busy || blockedCount > 0}
+          title={
+            blockedCount > 0
+              ? `还有 ${blockedCount} 道题不可用（未入库或已下线），先处理卷面题目`
+              : undefined
+          }
           onClick={() => setConfirming("submit")}
         >
           <SendIcon className="size-4" /> 提交审核
@@ -71,7 +88,12 @@ export function PaperActions({ paperId, versionId, status, isOwner, isTeacher, h
       {healthCount > 0 && canEdit && (
         <Button
           variant="outline"
-          disabled={busy}
+          disabled={busy || blockedCount > 0}
+          title={
+            blockedCount > 0
+              ? "还有题没入库，刷新会失败；先在编辑器里提交这些题审核"
+              : undefined
+          }
           onClick={() => call("paper_refresh_items", { p_version_id: versionId }, "已刷新到题库最新版本")}
         >
           <RefreshCwIcon className="size-4" /> 刷新题目

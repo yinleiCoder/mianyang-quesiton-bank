@@ -71,6 +71,11 @@ export function BuildPaperButton({ job, items, keptIds, onRefresh }) {
       await onRefresh?.()
       const warn = data.warnings ?? []
       toast.success(`已还原 ${data.sections?.length ?? 0} 个大题、${data.added} 道题`)
+      // 成卷只是把题变成题库草稿，离"能提交试卷"还差两级审核这一步。
+      // 不说清楚的话，教师会以为成卷失败（服务端随后会报"尚未入库"）。
+      toast.info("这些题还是题库草稿：在卷面顶部可一键提交审核，题目入库后这份试卷才能提交。", {
+        duration: 10000,
+      })
       if (warn.length > 0) {
         // 提醒不弹 toast 而是放长一点：教师需要在进编辑器前就知道哪儿要手工补
         toast.warning(warn[0], { duration: 8000 })

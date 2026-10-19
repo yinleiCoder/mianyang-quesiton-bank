@@ -38,7 +38,9 @@ export function PaperItemCard({
   })
 
   const style = { transform: CSS.Transform.toString(transform), transition }
-  const health = item.available === false ? "offline" : item.stale ? "stale" : null
+  // available=false 涵盖"未入库的 AI 草稿"和"已下线"，徽标不能一律写"已下线"——
+  // 前者是刚成卷后的正常状态，写成下线会把教师吓一跳。
+  const health = item.available === false ? "unavailable" : item.stale ? "stale" : null
 
   return (
     <div
