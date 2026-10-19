@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { FLAG_LABELS } from "@/lib/import-jobs"
-import { blocksToPlain, textToBlocks, draftIssues } from "@/lib/import-pipeline"
+import { blocksToPlain, draftIssues, itemFingerprint } from "@/lib/import-pipeline"
 import { qtypeLabel, DIFFICULTIES } from "@/lib/question-model"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -73,6 +73,9 @@ const FILTERS = [
 
 // 「缺答案」= 入库会被拒的那一类（choices 没选 / 判断没值 / 填空没答 / 主观没参考 / 空位对不上）
 const needsAnswer = (it) => draftIssues(it.qtype, it.content).some((s) => s.includes("答案") || s.includes("空位"))
+
+// 跨页比对用的归一化：空白（含全角空格）全部去掉，避免排版换行影响"包含"判断
+const normText = (s) => String(s ?? "").replace(/\s+/g, "")
 
 // 行内展示答案：一眼能看出"这题有没有答案"。返回 null 表示没有答案
 function answerText(content) {
@@ -157,7 +160,8 @@ export function ImportPreview({ job, items, onRefresh }) {
     const seen = new Set()
     const dupes = new Set()
     for (const it of items) {
-      const key = `${blocksToPlain(it.content?.stem).slice(0, 120)}|${JSON.stringify(it.content?.answer ?? {})}`
+      // 指纹把复合题的子题也算进去：同一段材料下不同小问的复合题不是重复题
+      const key = itemFingerprint(it.content)
       if (seen.has(key)) dupes.add(it.id)
       else seen.add(key)
     }
@@ -206,14 +210,46 @@ export function ImportPreview({ job, items, onRefresh }) {
   // 跨页合并的结果：下一页把上一页末尾那半截并成了完整题，上一页那条残题就该丢掉。
   // 不自动写库（那样会跟教师手动的勾选打架），只把它标出来 + 在「全部保留」时跳过——
   // 那道残题本身是能过入库校验的，不拦一下就会以"半句话"的形态混进题库。
-  const mergedPages = useMemo(
-    () => new Set(view.filter((i) => i.flags.includes("merged_cross_page")).map((i) => i.page_no)),
-    [view]
-  )
-  const superseded = (it) =>
-    it.flags.includes("cross_page") &&
-    !it.flags.includes("merged_cross_page") &&
-    mergedPages.has(it.page_no + 1)
+  // 先把下一页里"把上一页拼完整"的条目按页号收起来。
+  const mergedByPage = useMemo(() => {
+    const m = new Map()
+    for (const i of view) {
+      if (!i.flags.includes("merged_cross_page")) continue
+      const arr = m.get(i.page_no)
+      if (arr) arr.push(i)
+      else m.set(i.page_no, [i])
+    }
+    return m
+  }, [view])
+
+  // 复合题兜底：模型经常只给下一页的完整题标了 merged_cross_page，却忘了给上一页那半截
+  // 标 cross_page。若下一页的复合题把这条的材料锚点和实质性小问都包含进去了，就认定
+  // 是同一道题的前半截——否则同材料、少几个小问的那条会以"独立题"的身份混进题库。
+  function compositeCarries(full, part) {
+    const fullSubs = (full.content?.sub ?? []).map((s) => normText(blocksToPlain(s?.stem))).join("\u0001")
+    const partSubs = (part.content?.sub ?? [])
+      .map((s) => normText(blocksToPlain(s?.stem)))
+      .filter((t) => t.length >= 8)
+    if (partSubs.length === 0) return false
+    if (!partSubs.every((t) => fullSubs.includes(t))) return false
+    const partStem = normText(blocksToPlain(part.content?.stem))
+    if (partStem.length >= 20) {
+      const fullStem = normText(blocksToPlain(full.content?.stem))
+      // 材料可能被模型顺过句子，取开头一段做锚点，不强求整段逐字包含
+      const anchor = partStem.slice(0, Math.min(60, partStem.length))
+      if (!fullStem.includes(anchor)) return false
+    }
+    return true
+  }
+
+  const superseded = (it) => {
+    if (it.flags.includes("merged_cross_page")) return false
+    const nextMerged = mergedByPage.get(it.page_no + 1) ?? []
+    if (nextMerged.length === 0) return false
+    if (it.flags.includes("cross_page")) return true
+    if (it.qtype !== "composite") return false
+    return nextMerged.some((full) => full.qtype === "composite" && compositeCarries(full, it))
+  }
   // 默认全部保留；缺答案的不勾（入库必然被 DB 拒），但教师可以手动勾上作为"待补"占位
   const keptIds = useMemo(
     () => view.filter((i) => i.status === "kept" || i.status === "imported").map((i) => i.id),

@@ -111,13 +111,20 @@ console.log("\n【6】主观题：多行字符串 → samples 数组")
   ok(it.content.answer.samples[2] === "第三点", "内容正确")
 }
 
-console.log("\n【7】复合题：子题带 type、嵌套 composite 被剥掉、超 20 道截断")
+console.log("\n【7】复合题：子题带 type、嵌套 composite 被平铺、超 20 道截断")
 {
   const subs = Array.from({ length: 22 }, (_, i) => ({ type: "single_choice", stem: `小题${i}`, options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }], answer: { keys: ["A"] } }))
-  subs[0] = { type: "composite", stem: "嵌套的", sub: [{ type: "single_choice", stem: "x" }] }
+  subs[0] = {
+    type: "composite",
+    stem: "嵌套的",
+    sub: [{ type: "single_choice", stem: "嵌套小题", options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }], answer: { keys: ["A"] } }],
+  }
   const it = normalizeQuestion({ qtype: "composite", stem: "阅读材料…", sub: subs })
   ok(it.content.sub.length === 20, "子题截断到 20", it.content.sub.length)
   ok(it.content.sub.every((s) => s.type && s.type !== "composite"), "子题都有 type 且无嵌套 composite")
+  ok(blocksText(it.content.sub[0].stem) === "嵌套小题", "嵌套 composite 的小问被平铺保留而不是丢掉")
+  ok(it.content.sub.every((s) => s.format_version === 1), "子题带 format_version")
+  ok(draftIssues("composite", it.content).length === 0, "复合题预检不再假报缺少 format_version", draftIssues("composite", it.content))
   ok(it.flags.includes("low_confidence"), "截断过要标出来")
 }
 
@@ -271,6 +278,82 @@ console.log("\n【15】跨页的上下文确实进了 user 消息，且排在本
   // 第 1 页没有上一页：不该凭空造出上下文（只看上下文块，USER_TAIL 里本来就提到"上一页"）
   const first = buildPageParts({ pageNo: 1, text: "第一页" })
   ok(!first.some((p) => p.type === "text" && p.text.includes("【上一页")), "第 1 页没有上一页上下文")
+
+  // Word 导入的单位是「批」：提示里的"上一页/本页"要换掉，否则模型不知道上下文指什么
+  const batch = buildPageParts({ pageNo: 3, text: "本批正文", prevTail: "上一批结尾", unit: "批" })
+  const batchTexts = batch.filter((p) => p.type === "text").map((p) => p.text)
+  ok(batchTexts.some((t) => t.includes("【上一批末尾】")), "Word 批的上下文标成「上一批」")
+  ok(batchTexts.some((t) => t.includes("本批原文")), "Word 批的正文标成「本批」")
+}
+
+console.log("\n【16】复合题容错：漏标 qtype / 子题是字符串 / 用了 subs 别名 / 缺子题 qtype")
+{
+  const it = normalizeQuestion({
+    qtype: "short_answer", // 模型漏标成主观题，但 sub 数组在
+    stem: "阅读下面的材料，回答问题",
+    subs: [
+      { stem: "（1）下列说法正确的是", options: ["A. 甲", "B. 乙"], answer: { keys: ["B"] } },
+      "（2）谈谈你的理解。",
+      { stem: "（3）下列说法正确的有", options: ["A. 甲", "B. 乙", "C. 丙"], answer: { keys: ["A", "C"] } },
+      { stem: "（4）请填写______", answer: { values: ["答案"] } },
+      { stem: "（5）这个说法是正确的。", answer: "对" },
+    ],
+  })
+  ok(it.qtype === "composite", "有 sub 就提升为复合题", it.qtype)
+  ok(it.content.sub.length === 5, "五个小问都保留", it.content.sub.length)
+  ok(it.content.sub[0].type === "single_choice", "有选项、单字母答案的子题推断为单选", it.content.sub[0].type)
+  ok(it.content.sub[0].format_version === 1, "推断出的子题同样带 format_version")
+  ok(it.content.sub[1].type === "short_answer", "字符串子题按简答保留", it.content.sub[1].type)
+  ok(
+    it.content.sub[2].type === "multiple_choice" && it.content.sub[2].answer.keys.length === 2,
+    "多字母答案推断为多选且不丢字母",
+    it.content.sub[2]
+  )
+  ok(it.content.sub[3].type === "fill_blank", "题干有空位的子题推断为填空", it.content.sub[3].type)
+  ok(
+    it.content.sub[4].type === "true_false" && it.content.sub[4].answer.value === true,
+    "答案是「对」的子题推断为判断",
+    it.content.sub[4]
+  )
+  ok(it.flags.includes("answer_missing"), "子题缺答案会把整题标成缺答案", it.flags)
+  ok(
+    draftIssues("composite", it.content).some((s) => s.includes("子题 2")),
+    "第二个小问缺答案仍会被预检报出（不是被悄悄丢掉）",
+    draftIssues("composite", it.content)
+  )
+}
+
+console.log("\n【17】旧任务里没有 format_version 的子题不再被预检判死")
+{
+  const legacy = {
+    format_version: 1,
+    stem: [{ t: "text", text: "阅读材料" }],
+    sub: [
+      {
+        type: "short_answer",
+        stem: [{ t: "text", text: "（1）简答" }],
+        answer: { type: "text", samples: ["参考答案"] },
+      },
+    ],
+  }
+  ok(
+    draftIssues("composite", legacy).length === 0,
+    "DB 本身就不要求子题 format_version，预检不能比它更严",
+    draftIssues("composite", legacy)
+  )
+}
+
+console.log("\n【18】同一材料下的不同复合题不能被去重丢掉")
+{
+  const q = (n) => ({
+    qtype: "composite",
+    stem: "同一段阅读材料",
+    sub: [{ type: "short_answer", stem: `小问${n}`, answer: { samples: ["答"] } }],
+  })
+  const { items } = normalizePage({ questions: [q(1), q(2)] })
+  ok(items.length === 2, "两道不同小问的复合题都保留", items.length)
+  const same = normalizePage({ questions: [q(1), q(1)] })
+  ok(same.items.length === 1 && same.items[0].flags.includes("dup_in_job"), "完全相同的复合题仍然去重")
 }
 
 console.log(`

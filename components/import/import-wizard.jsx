@@ -507,17 +507,22 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
   }
   if (file.kind === "docx") {
     // Word 没有页：这里的"第 pageNo 批"是切好的题块分组（见 lib/docx-client.js 的 docxBatches）。
-    // 每批都是**完整题块的并集**，所以不会出现"题干在这批、选项在下批"的残缺题；
-    // 批与批之间也不重叠，于是同一道题不会被重复解析。
-    // 也因此没有"跨页拼接"这回事：批边界本来就落在两道题之间（prevPageContext 对 docx 返回 null）。
+    // 题块边界按理不会切断题干与选项，但**复合题的小问编号（（1）（2））会被当成新题开头**，
+    // 于是材料在这批、小问在下批是真实存在的。批间又完全没有上下文的话，模型只能看到
+    // 半道复合题。所以和 PDF 一样把上一批末尾带过去——模型能据此把小问拼回材料。
     const batch = file.batches?.[pageNo - 1]
     if (!batch) throw new Error(`第 ${pageNo} 批不存在（这份文档只有 ${file.batches?.length ?? 0} 批）`)
-    return {
+    const payload = {
       page_no: pageNo,
       mode: "text",
+      unit: "批",
       text: batch.text,
-      note: `本批为 Word 原文第 ${batch.start + 1}~${batch.end} 段，含 ${batch.questions} 道题`,
+      // 题块不等于题目数：复合题的小问常被当成独立题块切出来，别让模型以为数量对得上
+      note: `本批为 Word 原文第 ${batch.start + 1}~${batch.end} 段，含 ${batch.questions} 个题块（复合题的小问可能单独成块，请按材料合并）`,
     }
+    const prev = file.batches?.[pageNo - 2]
+    if (prev) payload.prev_tail = prev.text.slice(-PREV_TAIL_CHARS)
+    return payload
   }
   if (!file.handle) throw new Error("PDF 句柄已失效，请重新选择文件")
   const p = await file.handle.probe(pageNo)
@@ -550,7 +555,10 @@ export async function buildPagePayload(file, pageNo, mode = "auto", detail = "hi
 //   · 有文字层 → 原文末尾片段（便宜，且长题干也能拼全）；
 //   · 扫描件 → 上一页的**底部切片**（与页面切片同一缩放比例，不额外缩小）。
 // 取不到就返回 null：少一段上下文不该让这一页解析失败。
-const PREV_TAIL_CHARS = 600
+// 1500 字（2026-10-19 由 600 提高）：复合题往往是一整段阅读材料 + 多个小问，600 字
+// 经常只截到最后一个小问，模型根本看不到材料开头，跨页就拼不出来。文字页多给一千字
+// 只多几百 token，比让教师手工补前文便宜。
+const PREV_TAIL_CHARS = 1500
 // 文字层薄到这个程度就当它没有：扫描件常有"第 3 页"这种页眉文字层，
 // 拿它当跨页上下文等于没给（该给底部截图）。
 const MIN_TEXT_CHARS = 20
@@ -560,7 +568,8 @@ const TILE_ROWS = 2
 
 async function prevPageContext(file, pageNo, detail) {
   if (pageNo <= 1) return null
-  // Word 的"批"是按题切好的，不存在半截题；图片与 PDF 才需要
+  // Word 的上下文在 buildPagePayload 的 docx 分支里直接给（上一批末尾原文），
+  // 不走这里"文字片段 / 底部截图二选一"的取法。
   if (file.kind === "docx") return null
   try {
     if (file.kind === "image") {
