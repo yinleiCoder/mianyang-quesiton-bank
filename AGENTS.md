@@ -148,6 +148,9 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。分工：
   `client/latest.json`（缺 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 直接失败，
   避免"GitHub 发了、下载页还停在旧版本"）→ 网页端 1 分钟内跟上（revalidate 60）→
   客户端启动时读同一份清单检查更新。
+- ⚠ `release` job 的第一步必须是 `actions/checkout@v4`：它要执行
+  `tool/upload_to_oss.mjs`。只下载 artifact 的 job 里没有这个文件
+  （2026-10-21 v2.8.3 因此报 `MODULE_NOT_FOUND`；旧流程缺 secrets 时会跳过，所以一直没暴露）。
 - `latest.json` 结构：`{ tag, publishedAt, assets: [{ name, size, sha256, url }] }`；
   Windows 的 `url` 带 `?v=<tag>` 绕开 CDN 旧缓存。
 - 补历史版本：本机跑
