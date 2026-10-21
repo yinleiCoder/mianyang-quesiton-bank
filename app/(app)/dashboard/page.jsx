@@ -299,8 +299,16 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`你好，${profile?.name ?? "老师"} 👋`}
-        description="全市共建共享题库：你的题目经两级审核入库后，与各校共享。"
+        title={`你好，${profile?.name ?? "用户"} 👋`}
+        description={
+          ctx.isAdmin || ctx.isSchoolAdmin
+            ? "全市共建共享题库：管理基础数据、用户与审批任务。"
+            : ctx.isTeacher
+              ? "全市共建共享题库：你的题目经两级审核入库后，与各校共享。"
+              : ctx.isPendingTeacher
+                ? "教师身份审核中：现在可以先浏览题库，审核通过后即可出题与参与审批。"
+                : "全市共建共享题库：浏览已入库题目，在客户端随时刷题练习。"
+        }
       />
 
       {/* 教师身份待审核提示（0025：审核通过后才获得出题/审批权限） */}
@@ -316,12 +324,18 @@ export default async function DashboardPage() {
         <Suspense fallback={<StatCardSkeleton />}>
           <BankCountCard />
         </Suspense>
-        <Suspense fallback={<StatCardSkeleton />}>
-          <MyQuestionsCard />
-        </Suspense>
-        <Suspense fallback={<StatCardSkeleton />}>
-          <WaitingCard isApprover={ctx.isApprover} />
-        </Suspense>
+        {/* 出题/审核入口只属于教师与审批角色；学生与待审核教师看到的是空数据，
+            点了还会进到不该进的页面 —— 直接不渲染，连数据查询也省掉。 */}
+        {ctx.isTeacher && (
+          <Suspense fallback={<StatCardSkeleton />}>
+            <MyQuestionsCard />
+          </Suspense>
+        )}
+        {(ctx.isTeacher || ctx.isApprover || ctx.isAdmin || ctx.isSchoolAdmin) && (
+          <Suspense fallback={<StatCardSkeleton />}>
+            <WaitingCard isApprover={ctx.isApprover} />
+          </Suspense>
+        )}
         {ctx.isAdmin ? (
           <Suspense fallback={<StatCardSkeleton />}>
             <AdminScaleCard />
@@ -398,13 +412,15 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className={`grid gap-4 ${ctx.isTeacher ? "lg:grid-cols-2" : ""}`}>
         <Suspense fallback={<SectionSkeleton lines={3} />}>
           <RecentCard />
         </Suspense>
-        <Suspense fallback={<SectionSkeleton lines={3} />}>
-          <MyInflightCard />
-        </Suspense>
+        {ctx.isTeacher && (
+          <Suspense fallback={<SectionSkeleton lines={3} />}>
+            <MyInflightCard />
+          </Suspense>
+        )}
       </div>
     </div>
   )

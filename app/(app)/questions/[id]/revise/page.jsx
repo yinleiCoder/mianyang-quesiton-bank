@@ -17,6 +17,14 @@ export const metadata = { title: "发起改版" }
 export default async function ReviseQuestionPage({ params }) {
   const { id } = await params
   const ctx = await requireUser()
+  if (!ctx.isTeacher) {
+    return (
+      <AccessDenied
+        title="仅教师可发起改版"
+        description="题目改版是教师工作台的一部分；学生账号请到题库浏览。"
+      />
+    )
+  }
   const supabase = await createClient()
 
   const { data: question } = await supabase

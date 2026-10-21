@@ -13,6 +13,14 @@ export const metadata = { title: "修改题目" }
 export default async function EditQuestionPage({ params }) {
   const { id } = await params
   const ctx = await requireUser()
+  if (!ctx.isTeacher) {
+    return (
+      <AccessDenied
+        title="仅教师可编辑题目"
+        description="题目编辑是教师工作台的一部分；学生账号请到题库浏览。"
+      />
+    )
+  }
   const supabase = await createClient()
 
   const { data: question, error: qError } = await supabase

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth"
 import { isAttachable } from "@/lib/subject-nodes"
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { QuestionEditor } from "@/components/questions/question-editor"
+import { AccessDenied } from "@/components/access-denied"
 import { EmptyState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
@@ -13,6 +14,20 @@ export const metadata = { title: "出题" }
 
 export default async function NewQuestionPage() {
   const ctx = await requireUser()
+  // 出题是教师专属，服务端 create/save 的 RPC 也会拒；这里先给一句人话并挡住页面。
+  // 学生与教师待审核账号都可以浏览题库，但不能进入出题编辑器。
+  if (!ctx.isTeacher) {
+    return (
+      <AccessDenied
+        title="仅教师可出题"
+        description={
+          ctx.isPendingTeacher
+            ? "教师身份审核通过后才能出题；现在可以先浏览题库。"
+            : "学生账号可以浏览题库、参加考试；出题需要审核通过的教师身份。"
+        }
+      />
+    )
+  }
   if (!ctx.profile?.school_id) {
     return (
       <EmptyState

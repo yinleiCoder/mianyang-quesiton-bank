@@ -114,37 +114,44 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   文件名口径（洗非法字符 + 用 objectKey 的扩展名补后缀）在 `lib/materials.js` 的 `materialFileName`，
   与 Flutter 端 `material_brief.dart` 的 `suggestedFileName` 逐条一致，改一处要改另一处。
 
-## 客户端下载页：Windows 走自家 OSS，安卓走 GitHub 镜像（2026-10-12）
+## 客户端下载：Windows 走 OSS，APK 走 gh-proxy（2026-10-21 起）
 
-2026-10-12 在绵阳实测：GitHub release 资产 **20 秒拿不到一个字节**（HEAD 能过、正文取不到），
-同一时刻同一台机器上的自家成都 OSS 是 **7~9.6MB/s**。链接"正确"不等于下得动——学生看到的
-是一个永远转圈的下载按钮。所以 `/download` 改成两条线路并存。
+GitHub release 资产国内直连不可用；自家成都 OSS 快。分工：
 
-### ⚠ .apk 上不了 OSS，这是阿里云的规定不是 bug
+- `client/latest.json` 与 Windows `setup.exe` / `zip` 走阿里云 OSS；
+- **APK 走 gh-proxy 加速**（`NEXT_PUBLIC_GH_PROXY` / Flutter `Env.ghProxy`，
+  默认 `https://gh-proxy.com/`）。原因是阿里云不允许 `.apk` 从默认域名
+  （`*.aliyuncs.com`）分发，而绑定自定义域名要求大陆 ICP 备案；`myquiz.cn`
+  目前查不到有效备案，这条路短期走不通。
 
-**阿里云不允许 `.apk` 从 OSS 默认域名（`*.aliyuncs.com`）对外分发**，实测回
-`400 ApkDownloadForbidden`，正文写着"please use CNAME instead"。同一批探测里
-`.zip` / `.exe` / `.pdf` / `.bin` 全是 200——**只有 .apk 被拦**。
-服务端代拉（node fetch）同样被拦，所以"用 Next 转发一遍"这条路也不通。
+### .apk 的线路约定
 
-于是：**exe/zip 走 OSS，APK 走第三方 GitHub 加速镜像**（用户 2026-10-12 拍板）：
-- 镜像地址写死在 `app/download/page.jsx` 的 `GITHUB_MIRROR`，换镜像只改这一行。
-- 走第三方意味着**理论上镜像方可以替换安装包**，所以页面上印了 SHA-256（默认收起的
-  `<details>`）。那个摘要来自 GitHub 官方 Release 的 digest，是逐字节核对过的
-  ——**别把它删了**，它是这条线路唯一的自证手段。
-- 想彻底摆脱第三方：给桶绑自定义域名后 APK 会自动改走 OSS（`--allow-apk` 重跑上传脚本即可，
-  `assetUrl` 是看清单里的 `mirrored` 字段决定的）。境外区域的桶绑域名不需要备案。
+- 页面/客户端从 OSS 清单拿 `tag` 与 SHA-256，再用 **tag + 固定资产名**拼：
+  `${GH_PROXY}https://github.com/yinleiCoder/mianyang-quiz/releases/download/<tag>/<name>`。
+  **不要用 `latest/download`**：清单已经告诉用户是哪个版本，用 latest 会出现
+  "页面显示 v2.8.1、下到 v2.8.0" 的漂移。
+- 清单里 APK 的 `url` 通常为 `null`；若将来给桶绑了自定义域名并设置
+  `CLIENT_OSS_PUBLIC_BASE`，清单里的 OSS `url` 会优先，APK 自动改走 OSS。
+- 换 gh-proxy 节点只改环境变量/`Env.ghProxy`，不要把代理地址散落在组件里。
 
-### 资产名与上线顺序
+### 资产名、版本号与上线顺序
 
 - **资产名两端逐字一致**（都不带版本号）：网页端 `app/download/page.jsx` 的
   `APK_ASSET` / `WIN_SETUP_ASSET` / `WIN_ZIP_ASSET`，与客户端仓库
   `mianyang_quiz/tool/upload_to_oss.mjs` 推上去的名字是同一套。改一处必须改另一处，
   否则页面点下去是 404。
-- **上线顺序**：客户端打 tag → `release.yml` 的「镜像到阿里云 OSS」把 `assets/*` 推到
-  `client/` 并写一份 `client/latest.json` → 网页端 5 分钟内跟上（页面 revalidate 300）。
-  那一步需要客户端仓库配 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 两个 secret；
-  **没配不会让发布失败**，只是退回慢线路（页面的元数据顺序是
-  OSS 的 latest.json → GitHub API → 都没有就整块不渲染版本号）。
-- 补历史版本：本机跑 `node tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z` 即可，
-  脚本会跳过 .apk（并如实标 `mirrored:false`）、校验上传后的长度、写 latest.json。
+- **版本号三处同源**：客户端构建注入的 `APP_VERSION`、`client/latest.json` 的 `tag`、
+  网页端下载页显示的版本徽标都来自同一个 git tag。客户端个人资料页会显示
+  「当前版本 vX.Y.Z」，更新检查与网页端读同一份清单。
+- **上线顺序**：客户端打 tag → **GitHub Release**（gh-proxy 的上游必须先存在）→
+  `release.yml` 的「上传到阿里云 OSS」把 `assets/*` 推到 `client/` 并写
+  `client/latest.json`（缺 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 直接失败，
+  避免"GitHub 发了、下载页还停在旧版本"）→ 网页端 1 分钟内跟上（revalidate 60）→
+  客户端启动时读同一份清单检查更新。
+- `latest.json` 结构：`{ tag, publishedAt, assets: [{ name, size, sha256, url }] }`；
+  Windows 的 `url` 带 `?v=<tag>` 绕开 CDN 旧缓存。
+- 补历史版本：本机跑
+  `node tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z [--public-base https://<域名>/client]`，
+  脚本会校验上传后的长度（APK 在默认域名上跳过长度回读）并写 latest.json。
+- 2026-10-21 曾尝试把 `download.myquiz.cn` 绑到大陆 bucket，因备案问题未成功；
+  Cloudflare 上还留着 TXT `_dnsauth.download` 与 CNAME `download`，不再使用时可以删掉。
