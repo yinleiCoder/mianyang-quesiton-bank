@@ -13,6 +13,7 @@ import { round2 } from "@/lib/paper-units"
 import { PaperSheet } from "@/components/papers/paper-sheet"
 import { ExportPdfButton } from "@/components/papers/export-pdf-button"
 import { PaperActions } from "@/components/papers/paper-actions"
+import { PaperRevisionActions } from "@/components/papers/paper-revision-actions"
 import { PaperInsightLinks } from "@/components/papers/paper-insight-links"
 import { AccessDenied } from "@/components/access-denied"
 import { Badge } from "@/components/ui/badge"
@@ -85,23 +86,28 @@ export default async function PaperDetailPage({ params }) {
   // 只要有一道不可用，提交就会被服务端拒（未入库/已下线都算）
   const blockedCount = items.filter((i) => i.available === false).length
 
-  // 是否还有在流版本（决定「发起改版」能不能点）
-  const { count: inFlight } = await supabase
+  // 在流版本（草稿/审核中/退回）。详情页主预览默认是已入库版，改版草稿要单独给入口，
+  // 否则发起改版之后这份草稿就"消失"了（2026-10-22 用户报）。
+  const { data: inFlightVersions } = await supabase
     .from("paper_versions")
-    .select("id", { count: "exact", head: true })
+    .select("id, version_no, status")
     .eq("paper_id", id)
     .in("status", ["draft", "pending_group", "pending_city", "returned"])
+    .order("version_no", { ascending: false })
+  const inFlightVersion = inFlightVersions?.[0] ?? null
+  const hasInFlight = (inFlightVersions ?? []).length > 0
+  const hasWaitingApproval = (inFlightVersions ?? []).some(
+    (v) => v.status === "pending_group" || v.status === "pending_city"
+  )
 
   // 能不能删（决定「删除」出不出现）。判据与服务端 delete_paper 的断言同一条（0091）：
-  // **有没有人考过** + 有没有在审任务。RLS 对作者放行本卷的全部作答（is_paper_grader 含 creator），
-  // 所以这里数得准；真正拦人的仍是 RPC 里的断言与 exam_attempts 的 ON DELETE RESTRICT。
-  // 拿版本状态去猜是不行的：入库了但没人考过的卷子，正是旧判据误伤的那一类。
+  // **有没有人考过** + 有没有在审任务。改版草稿/已退回本身不挡整卷删除（它没有在审任务）；
+  // 真正拦人的仍是 RPC 里的断言与 exam_attempts 的 ON DELETE RESTRICT。
   const { count: attemptCount } = await supabase
     .from("exam_attempts")
     .select("id", { count: "exact", head: true })
     .eq("paper_id", id)
-  const inFlightNow = (inFlight ?? 0) > 0 && snapshot.status !== "draft" && snapshot.status !== "returned"
-  const canDelete = isOwner && (attemptCount ?? 0) === 0 && !inFlightNow
+  const canDelete = isOwner && (attemptCount ?? 0) === 0 && !hasWaitingApproval
 
   return (
     <div className="space-y-6">
@@ -178,12 +184,44 @@ export default async function PaperDetailPage({ params }) {
         status={snapshot.status}
         isOwner={isOwner}
         isTeacher={ctx.isTeacher}
-        hasInFlight={inFlightNow}
+        hasInFlight={hasInFlight}
         canDelete={canDelete}
         // 只有"已入库但旧版"的题能靠 paper_refresh_items 修；未入库/已下线的不行
         healthCount={staleItems.length}
         blockedCount={blockedCount}
       />
+
+      {/* 已入库试卷的改版草稿：主预览仍是入库版，改版单独给编辑/删除入口。
+          没有这条横幅时，发起改版后详情页看起来和改版前一样，草稿等于"消失"了。 */}
+      {isOwner &&
+        paper.current_published_version_id &&
+        inFlightVersion &&
+        inFlightVersion.id !== paper.current_published_version_id && (
+          <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            <p className="font-medium">
+              有一份改版{paperStatusChip(inFlightVersion.status).text}（v{inFlightVersion.version_no}）
+            </p>
+            <p className="mt-1 text-xs">
+              主预览仍是已入库版本。
+              {inFlightVersion.status === "draft" || inFlightVersion.status === "returned"
+                ? "改版可以继续编辑；不需要了可以只删这份草稿，已入库版本不受影响。"
+                : "改版正在审核；如需修改请先撤回，撤回后回到草稿。"}
+            </p>
+            <div className="mt-2">
+              <PaperRevisionActions versionId={inFlightVersion.id} status={inFlightVersion.status} />
+            </div>
+          </div>
+        )}
+
+      {isOwner && !canDelete && (
+        <p className="text-xs text-muted-foreground">
+          {attemptCount > 0
+            ? `已有 ${attemptCount} 场考试记录，不能删除（学生还要在成绩单里看它）。`
+            : hasWaitingApproval
+              ? "有审核中的改版任务，不能删除整份试卷；请先在改版横幅里撤回。"
+              : ""}
+        </p>
+      )}
 
       {unavailable.length > 0 && (
         <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900">

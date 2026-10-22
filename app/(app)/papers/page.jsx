@@ -28,7 +28,13 @@ const PAGE_SIZE = 20
 //
 // 那个 `??` 是给**迁移还没落库**的环境兜底的（0091 在新环境里可能还没跑）：
 // 拿不到 deletable 时退回旧口径（纯草稿），至少不会给出一个点了必然被拒的按钮。
-const canDeletePaper = (p) => p.deletable ?? (p.status === "draft" && Number(p.version_no) === 1)
+const canDeletePaper = (p, ctx) =>
+  (p.deletable ?? (p.status === "draft" && Number(p.version_no) === 1)) &&
+  // 公共组卷库里有别人的卷子：只有创建者/系统管理员能删（与 delete_paper 的断言同源）
+  (p.creator_id === ctx.user?.id || ctx.isAdmin) &&
+  // 改版草稿行（有已入库版本、当前显示的是在流版本）不给整卷删除：
+  // 那会把已入库版本一起删掉。改版草稿请在详情页用「删除改版草稿」。
+  !(p.published_version_id && p.version_id !== p.published_version_id)
 
 export default async function PapersPage({ searchParams }) {
   const sp = (await searchParams) ?? {}
@@ -197,7 +203,7 @@ export default async function PapersPage({ searchParams }) {
               </div>
               {/* 删除入口：判据来自服务端（见 canDeletePaper）。"全部试卷"页签里都是已入库的卷子，
                   但其中没人考过的照样可以删 */}
-              {canDeletePaper(p) && <PaperDeleteButton paperId={p.paper_id} title={p.title} />}
+              {canDeletePaper(p, ctx) && <PaperDeleteButton paperId={p.paper_id} title={p.title} />}
             </div>
           ))}
         </div>

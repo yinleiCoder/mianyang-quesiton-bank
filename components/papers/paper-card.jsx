@@ -11,6 +11,10 @@ const STAGE_LABEL = { group: "教研组长", city: "市级专家" }
 export function PaperCard({ paper, ownerView = false }) {
   const chip = paperStatusChip(paper.status)
   const pending = paper.status === "pending_group" || paper.status === "pending_city"
+  // 合卷者去掉创建者本人（创始人可能也被分过一段，重复列一次没有意义）
+  const collaborators = (paper.collaborators ?? []).filter(
+    (name) => name && name !== paper.creator_name
+  )
   return (
     <Link
       href={`/papers/${paper.paper_id}`}
@@ -33,6 +37,14 @@ export function PaperCard({ paper, ownerView = false }) {
             第 {paper.version_no} 版
             {paper.published_at ? ` · 入库于 ${fmtDate(paper.published_at)}` : ""}
           </p>
+          {(paper.creator_name || collaborators.length > 0) && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {paper.creator_name ? `创建：${paper.creator_name}` : ""}
+              {collaborators.length > 0
+                ? `${paper.creator_name ? " · " : ""}合卷：${collaborators.join("、")}`
+                : ""}
+            </p>
+          )}
           <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <span className="inline-flex items-center gap-1">
               <FileTextIcon className="size-3.5 text-muted-foreground" />
