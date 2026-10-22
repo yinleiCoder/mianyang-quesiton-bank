@@ -12,6 +12,7 @@ import { indexNodes, isPaperNode, subtreeIdsOf } from "@/lib/subject-nodes"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { PaperItemPreviewDialog } from "@/components/papers/paper-item-preview-dialog"
 import { SearchIcon, PlusIcon, GripVerticalIcon } from "lucide-react"
 import { SkeletonRows } from "@/components/ui/skeletons"
 
@@ -50,6 +51,10 @@ function DraggableRow({ row, onAdd }) {
           </div>
           <p className="mt-0.5 line-clamp-2">{contentSummary(row.content) || "（无题干）"}</p>
         </div>
+        <PaperItemPreviewDialog
+          compact
+          item={{ qtype: row.qtype, difficulty: row.difficulty, content: row.content, seq: null }}
+        />
         <Button
           size="icon"
           variant="ghost"

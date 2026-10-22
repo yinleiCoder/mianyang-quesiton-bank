@@ -1,6 +1,6 @@
 // 只读题目渲染（审批详情/题库预览共用）。showAnswer=false 时隐藏答案与解析（公众视角）；
 // 审核视角 showAnswer=true 需看到答案才能判断。媒体块按 object_key 拼 CNAME 公网域名真实渲染。
-import { blocksToText, qtypeLabel } from "@/lib/question-model"
+import { blocksToText, qtypeLabel, stripSubNumber, withSubNumber } from "@/lib/question-model"
 import { mediaUrl } from "@/lib/oss-url"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2Icon, FileIcon } from "lucide-react"
@@ -216,12 +216,20 @@ export function QuestionView({ qtype, content, showAnswer = false, variant }) {
         <div className={isPaper ? "space-y-2" : "space-y-5"}>
           {subs.map((sub, i) => (
             <div key={i} className="space-y-1">
-              <div className="flex items-center gap-2">
-                {/* 卷面上子题要标"（1）（2）"，不能标"子题 1"——那是编辑器的话 */}
-                <span className="font-medium tabular-nums">{isPaper ? `（${i + 1}）` : `子题 ${i + 1}`}</span>
-                {!isPaper && <span className="text-xs text-muted-foreground">{qtypeLabel(sub.type)}</span>}
-              </div>
-              <QuestionBody qtype={sub.type} content={sub} showAnswer={showAnswer} variant={variant} />
+              {/* 卷面上子题要标"（1）（2）"，且要和题干同一行（序号单独一行会像"没有题干"）。
+                  non-paper（审核/题库）仍保留"子题 N"标签，方便看题型。 */}
+              {!isPaper && (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium tabular-nums">子题 {i + 1}</span>
+                  <span className="text-xs text-muted-foreground">{qtypeLabel(sub.type)}</span>
+                </div>
+              )}
+              <QuestionBody
+                qtype={sub.type}
+                content={isPaper ? withSubNumber(sub, i + 1) : { ...sub, stem: stripSubNumber(sub.stem) }}
+                showAnswer={showAnswer}
+                variant={variant}
+              />
             </div>
           ))}
         </div>

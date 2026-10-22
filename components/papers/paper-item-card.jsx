@@ -5,12 +5,11 @@
 // 为什么拖拽之外还必须有按钮：一份真题动辄 32 道选择题，用鼠标精确拖到第 17 题和第 18 题之间
 // 是不现实的；键盘用户更是完全用不了拖拽。dnd-kit 的 KeyboardSensor 能覆盖一部分，
 // 但"移到上一大题"这种跨容器操作还是按钮最直接。
-import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { PaperItemPreview } from "@/components/papers/paper-item-preview"
+import { PaperItemPreviewDialog } from "@/components/papers/paper-item-preview-dialog"
 import { qtypeShortLabel, difficultyLabel } from "@/lib/question-model"
 import { round2 } from "@/lib/paper-model"
 import { HEALTH_LABEL } from "@/lib/paper-workbench"
@@ -21,8 +20,6 @@ import {
   CornerLeftUpIcon,
   Trash2Icon,
   RotateCcwIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
 } from "lucide-react"
 
 export function PaperItemCard({
@@ -42,9 +39,6 @@ export function PaperItemCard({
   })
 
   const style = { transform: CSS.Transform.toString(transform), transition }
-  // 卷面卡片默认只显示两行摘要：一屏要看几十道题，全展开会把画布拉得非常长。
-  // 但组卷时经常需要核对完整题干/选项（尤其是补小题、改分值），所以给一个就地展开。
-  const [expanded, setExpanded] = useState(false)
   // available=false 涵盖"未入库的 AI 草稿"和"已下线"，徽标不能一律写"已下线"——
   // 前者是刚成卷后的正常状态，写成下线会把教师吓一跳。
   const health = item.available === false ? "unavailable" : item.stale ? "stale" : null
@@ -103,30 +97,12 @@ export function PaperItemCard({
                 {HEALTH_LABEL.stale}
               </Badge>
             ) : null}
+            {item.content && <PaperItemPreviewDialog item={item} />}
           </div>
-          {!expanded && (
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.summary || "（无题干预览）"}</p>
-          )}
-          {expanded && item.content && (
-            <PaperItemPreview qtype={item.qtype} content={item.content} />
-          )}
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.summary || "（无题干预览）"}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          {item.content && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              title={expanded ? "收起题目" : "查看完整题干"}
-              onClick={(e) => {
-                e.stopPropagation()
-                setExpanded((v) => !v)
-              }}
-            >
-              {expanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
-            </Button>
-          )}
           {item.custom_units && onResetUnits && (
             <Button
               size="icon"

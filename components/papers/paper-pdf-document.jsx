@@ -10,7 +10,7 @@
 import { Document, Page, Text, View, Image, StyleSheet } from "@react-pdf/renderer"
 import { CJK_FONT } from "@/lib/pdf-fonts"
 import { imageBox, printableText } from "@/lib/pdf-prep"
-import { blocksToText } from "@/lib/question-model"
+import { blocksToText, withSubNumber } from "@/lib/question-model"
 import { cnNumeral, sectionHeading, round2 } from "@/lib/paper-model"
 
 const S = StyleSheet.create({
@@ -147,8 +147,14 @@ function Body({ qtype, content, showAnswer, images }) {
         {blocksToText(c.stem).trim() ? <Blocks blocks={c.stem} images={images} /> : null}
         {subs.map((sub, i) => (
           <View key={i} style={{ marginTop: 4 }}>
-            <Text style={{ fontWeight: 700 }}>（{i + 1}）</Text>
-            <Body qtype={sub.type} content={sub} showAnswer={showAnswer} images={images} />
+            {/* 序号并进题干第一段：单独一行会像"只有编号、没有题干"，也会和题干里
+                自带的「（4）」叠成两个。withSubNumber 先剥自带序号再补渲染器序号。 */}
+            <Body
+              qtype={sub.type}
+              content={withSubNumber(sub, i + 1)}
+              showAnswer={showAnswer}
+              images={images}
+            />
           </View>
         ))}
         {showAnswer && blocksToText(c.analysis).trim() ? (

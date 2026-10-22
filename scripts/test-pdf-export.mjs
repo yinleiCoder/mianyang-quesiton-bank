@@ -15,6 +15,7 @@ import { renderToFile } from "@react-pdf/renderer"
 import { PaperPdfDocument } from "@/components/papers/paper-pdf-document"
 import { registerPdfFonts, missingGlyphs } from "@/lib/pdf-fonts"
 import { collectMediaKeys, collectText, imageBox, imageBytesKind } from "@/lib/pdf-prep"
+import { stripSubNumber, withSubNumber } from "@/lib/question-model"
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const OUT = path.join(ROOT, ".next", "pdf-test")
@@ -182,13 +183,17 @@ const SNAPSHOT = {
             sub: [
               {
                 type: "fill_blank",
-                content: { stem: [T("（1）材料中提到的“三顾茅庐”说的是______。")], answer: { values: ["刘备三次拜访诸葛亮"] } },
+                stem: [T("（1）材料中提到的“三顾茅庐”说的是______。")],
+                answer: { values: ["刘备三次拜访诸葛亮"] },
               },
               {
                 type: "short_answer",
-                content: {
-                  stem: [T("（2）结合材料，谈谈你对工匠精神的理解。")],
-                  answer: { samples: ["工匠精神是对产品精雕细琢、追求极致的职业态度。", "它要求从业者耐得住寂寞，在重复中打磨技艺。"] },
+                stem: [T("（2）结合材料，谈谈你对工匠精神的理解。")],
+                answer: {
+                  samples: [
+                    "工匠精神是对产品精雕细琢、追求极致的职业态度。",
+                    "它要求从业者耐得住寂寞，在重复中打磨技艺。",
+                  ],
                 },
               },
             ],
@@ -255,6 +260,11 @@ async function main() {
   ok(missingGlyphs("陈𠮷").join("") === "𠮷", "超出 GB2312 的字被认出来")
   ok(collectMediaKeys(SNAPSHOT).join(",") === "qbank/2026/demo-1.png,qbank/取不到的图.png", "只收图片、按出现顺序去重")
   ok(collectText(SNAPSHOT).includes("下列词语"), "文字收集覆盖题干")
+  // 复合题子题序号：题干自带「（4）」时不能和渲染器序号叠成「（4）（4）」；
+  // 但以数字开头的正文（网段、小数）不能被误剥。
+  ok(stripSubNumber([T("（4）通过计算")])[0].text === "通过计算", "子题自带序号被剥掉")
+  ok(stripSubNumber([T("10.5.80.0/22 是子网")])[0].text === "10.5.80.0/22 是子网", "网段/小数不被误剥")
+  ok(withSubNumber({ stem: [T("（4）通过计算")] }, 2).stem[0].text === "（2）通过计算", "卷面子题序号统一由渲染器给")
   // 图片字节嗅探：认不出来的必须在抓取阶段拦下，否则渲染阶段会连累整份导出。
   // webp 那条是真踩过的坑——展示地址默认带 format,webp，而 react-pdf 不认 webp。
   ok(imageBytesKind(makePng(4, 4)) === "png", "认得 png")
@@ -291,6 +301,8 @@ async function main() {
     ok(pages.length >= 1 && pages.every((p) => p.trim().length > 0), "每页都有文字（没有空白页）")
     ok(!text.includes("�"), "抽回的文本没有乱码")
     ok(text.includes("下列词语中加点字的读音"), "中文题干完整落在 PDF 里")
+    ok(text.includes("三顾茅庐"), "复合题子题题干落在 PDF 里")
+    ok(!text.includes("（1）（1）"), "子题序号没有重复（题干自带序号已剥掉）")
     ok(text.includes("职教高考联盟"), "页脚署名在")
     ok(text.includes("第 1 /"), "页码在")
     ok(imgCount >= 1, "题干里的图片被嵌进 PDF")
