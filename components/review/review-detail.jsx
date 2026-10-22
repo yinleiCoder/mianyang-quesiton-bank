@@ -26,15 +26,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Loader2Icon } from "lucide-react"
+import { Loader2Icon, Undo2Icon } from "lucide-react"
 
 export function ReviewDetail({ data }) {
   const router = useRouter()
   const a = data.approval
   const v = data.version
-  const [busy, setBusy] = useState("") // "" | pass | return | transfer
+  const [busy, setBusy] = useState("") // "" | pass | return | transfer | retract
   const [returnOpen, setReturnOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
+  const [retractOpen, setRetractOpen] = useState(false)
   const [comment, setComment] = useState("")
   const [targetId, setTargetId] = useState("")
 
@@ -81,6 +82,22 @@ export function ReviewDetail({ data }) {
     router.refresh()
   }
 
+  // 作者在审批详情页直接撤回：不必退回「我的题目」再找一遍。
+  // 与服务端 retract_question 同一条判据：自己的、仍在审的版本。
+  async function retract() {
+    setBusy("retract")
+    const supabase = createClient()
+    const { error } = await supabase.rpc("retract_question", { p_version_id: v.id })
+    setBusy("")
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success("已撤回，版本已回到草稿")
+    setRetractOpen(false)
+    router.push("/questions?tab=mine&status=draft")
+  }
+
   const chain =
     a.kind === "content"
       ? { ...deriveChain(data.timeline, "content"), published: Boolean(v && (v.status === "published" || v.status === "superseded")) }
@@ -100,6 +117,14 @@ export function ReviewDetail({ data }) {
         assignedLabel,
       })
     : requestFlowSteps({ approval: a, creatorName: data.question.creatorName, assignedLabel })
+
+  // 作者视角：内容任务仍在审、且当前版本是待审状态 → 允许直接撤回。
+  // 判据与 retract_question 一致（自己的 + pending_group/pending_city）。
+  const canRetract =
+    a.kind === "content" &&
+    a.state === "waiting" &&
+    data.meId === data.question.creatorId &&
+    (v?.status === "pending_group" || v?.status === "pending_city")
 
   // 转派目标不可为作者本人或池内已有的人
   const notTargetable = (c) =>
@@ -167,6 +192,28 @@ export function ReviewDetail({ data }) {
           <Button size="sm" onClick={() => decide(true)} disabled={Boolean(busy)}>
             {busy === "pass" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
             通过
+          </Button>
+        </div>
+      )}
+
+      {/* 作者操作条：审批详情页也能直接撤回，不用回「我的题目」翻列表 */}
+      {canRetract && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2.5">
+          <p className="mr-auto text-sm">
+            你是这道题的作者。审核中可以直接撤回，回到草稿修改后重新提交。
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setRetractOpen(true)}
+            disabled={Boolean(busy)}
+          >
+            {busy === "retract" ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <Undo2Icon className="size-3.5" />
+            )}
+            撤回提交
           </Button>
         </div>
       )}
@@ -246,6 +293,34 @@ export function ReviewDetail({ data }) {
           </ol>
         )}
       </div>
+
+      {/* 作者撤回对话框 */}
+      {retractOpen && (
+        <AlertDialog open onOpenChange={(o) => !o && !busy && setRetractOpen(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>撤回这次提交？</AlertDialogTitle>
+              <AlertDialogDescription>
+                撤回后版本回到草稿态，等待中的审批任务会被取消；你可以修改后重新提交，
+                审核流程会从教研组长环节重新走一遍。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={Boolean(busy)}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={Boolean(busy)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  retract()
+                }}
+              >
+                {busy === "retract" && <Loader2Icon className="size-4 animate-spin" />}
+                确认撤回
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       {/* 退回对话框（必填意见） */}
       {returnOpen && (

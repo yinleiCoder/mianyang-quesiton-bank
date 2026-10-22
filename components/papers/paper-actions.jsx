@@ -60,11 +60,15 @@ export function PaperActions({
       {canSubmit && (
         <Button
           variant="outline"
-          disabled={busy || blockedCount > 0}
+          // stale（题库已有新版本）也要先刷新：submit_paper 会拒绝并提示"已更新到新版本"。
+          // 与其让老师点了才看到，不如在这里先禁用并说清楚。
+          disabled={busy || blockedCount > 0 || healthCount > 0}
           title={
             blockedCount > 0
               ? `还有 ${blockedCount} 道题不可用（未入库或已下线），先处理卷面题目`
-              : undefined
+              : healthCount > 0
+                ? `还有 ${healthCount} 道题在题库里有新版本，先点「刷新题目」`
+                : undefined
           }
           onClick={() => setConfirming("submit")}
         >

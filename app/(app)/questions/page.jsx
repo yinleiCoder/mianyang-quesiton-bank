@@ -29,8 +29,17 @@ export default async function MyQuestionsPage({ searchParams }) {
     loadMyPublishableIds(supabase, ctx.user.id),
   ])
 
-  // 提交/撤回后的落地页签：status=返回版本状态 → 对应筛选
-  const initialFilter = { pending_group: "pending", pending_city: "pending", returned: "returned" }[status] ?? "all"
+  // 提交/撤回/恢复后的落地页签：status=返回版本状态 → 对应筛选。
+  // draft/retracted 也要映射：组卷页的「去我的题目看草稿」带 status=draft，
+  // 审批详情页撤回后也带 status=draft 回来。
+  const initialFilter =
+    {
+      draft: "draft",
+      pending_group: "pending",
+      pending_city: "pending",
+      returned: "returned",
+      retracted: "retracted",
+    }[status] ?? "all"
 
   return (
     <div className="space-y-4">

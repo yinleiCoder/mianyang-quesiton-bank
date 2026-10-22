@@ -52,6 +52,12 @@ const CONFIRM_TEXT = {
     action: "确认撤回",
     busy: "正在撤回…",
   },
+  restoreVersion: {
+    title: "恢复为草稿？",
+    desc: () => "恢复后这个版本回到草稿态，可以继续修改并重新提交审核。",
+    action: "确认恢复",
+    busy: "正在恢复…",
+  },
   delete: {
     title: "删除这道题目？",
     desc: () => "该题从未提交过，删除后不可恢复。",
@@ -108,6 +114,7 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
     const action = {
       submit: { fn: "submit_question", arg: { p_version_id: row.working.id } },
       retract: { fn: "retract_question", arg: { p_version_id: row.working.id } },
+      restoreVersion: { fn: "restore_retracted_question", arg: { p_version_id: row.latest.id } },
       delete: { fn: "delete_question_draft", arg: { p_question_id: qid } },
       offline: {
         fn: "request_question_state_change",
@@ -131,11 +138,15 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
     toast.success({
       submit: "已提交审核",
       retract: "已撤回",
+      restoreVersion: "已恢复为草稿，可以继续修改",
       delete: "已删除",
       offline: "下线申请已提交，等待教研组长审批",
       restore: "恢复申请已提交，等待教研组长审批",
     }[kind])
     await refresh()
+    // 撤回/恢复之后版本回到 draft：留在「审核中」页签会让这一行凭空消失，
+    // 老师会以为题丢了。切到草稿页签，行和它的「编辑 / 提交审核」就在眼前。
+    if (kind === "retract" || kind === "restoreVersion") setFilter("draft")
   }
 
   /* ---------- 批量动作 ---------- */
@@ -405,6 +416,18 @@ function Row({ row, onAction, busy }) {
           {showRetract && (
             <Button size="sm" variant="outline" onClick={() => onAction("retract")} disabled={busy}>
               <Undo2Icon className="size-3.5" /> 撤回
+            </Button>
+          )}
+          {/* 0101：历史 retracted 版本的唯一入口。恢复后它变成 draft，
+              下一次刷新就会出现在「草稿」页签里。 */}
+          {row.canRestoreVersion && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onAction("restoreVersion")}
+              disabled={busy}
+            >
+              <Undo2Icon className="size-3.5" /> 恢复为草稿
             </Button>
           )}
           {/* 审批详情对作者只读（RLS 放行 is_question_creator）：步骤条 + 时间线就是"审核流程" */}

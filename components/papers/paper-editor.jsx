@@ -239,7 +239,21 @@ export function PaperEditor({ initialSnapshot, nodes }) {
       return
     }
     toast.success(`已把 ${data.fixed} 道题刷新到题库最新版本`)
-    router.refresh()
+    // router.refresh() 只换服务端 props；编辑器的 useReducer 不会从新 props 重建，
+    // 所以必须把刷新后的快照取回来自己交给 reducer。否则「题库有新版本」的徽标、
+    // 提交预检都还停在刷新前，老师会以为刷新没生效。
+    const { data: snap, error: snapError } = await supabase.rpc("get_paper_version", {
+      p_version_id: state.versionId,
+    })
+    if (snapError || !snap) {
+      toast.warning("题目已刷新，但没取到最新卷面，请重新打开本页确认")
+      router.refresh()
+      return
+    }
+    // 刷新会改题项分值 → trg_paper_items_total 重算 total_score → touch 触发器
+    // 刷新 paper_versions.updated_at。乐观锁的 expected_us 必须跟着换，
+    // 否则下一次保存会被误判成"在别处被修改过"（40001）。
+    dispatch({ type: "itemsRefresh", items: snap.items, updatedUs: snap.updated_us })
   }, [state.dirty, state.versionId, save, supabase, router])
 
   const onDragEnd = useCallback(
