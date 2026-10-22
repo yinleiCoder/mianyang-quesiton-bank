@@ -2,7 +2,7 @@
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { fmtDate } from "@/lib/format"
-import { round2 } from "@/lib/paper-model"
+import { round2 } from "@/lib/paper-units"
 import { paperStatusChip } from "@/lib/paper-workbench"
 import { FileTextIcon, ClockIcon, AlertTriangleIcon } from "lucide-react"
 

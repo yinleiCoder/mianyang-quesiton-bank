@@ -11,7 +11,8 @@ import { Document, Page, Text, View, Image, StyleSheet } from "@react-pdf/render
 import { CJK_FONT } from "@/lib/pdf-fonts"
 import { imageBox, printableText } from "@/lib/pdf-prep"
 import { blocksToText, withSubNumber } from "@/lib/question-model"
-import { cnNumeral, sectionHeading, round2 } from "@/lib/paper-model"
+import { cnNumeral, sectionHeading } from "@/lib/paper-model"
+import { round2 } from "@/lib/paper-units"
 
 const S = StyleSheet.create({
   // ⚠ 行距**不能**写在 page 上：页脚是一个带 render 回调的 Text，而 react-pdf 里

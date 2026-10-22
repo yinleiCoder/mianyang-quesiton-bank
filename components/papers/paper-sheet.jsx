@@ -4,7 +4,8 @@
 // 正卷必须传 false 并把答案放到**独立路由**——不能靠 print:hidden 藏，
 // 藏起来的 DOM 照样能被查看源码/复制，等于把答案随卷子一起发给了学生。
 import { QuestionView } from "@/components/questions/question-view"
-import { cnNumeral, sectionHeading, round2 } from "@/lib/paper-model"
+import { cnNumeral, sectionHeading } from "@/lib/paper-model"
+import { round2 } from "@/lib/paper-units"
 
 // 卷头：考试名称 / 科目 / 总分 / 时长 / 姓名得分栏
 function PaperHead({ snap }) {

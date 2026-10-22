@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { fmtDateTime } from "@/lib/format"
-import { round2 } from "@/lib/paper-model"
+import { round2 } from "@/lib/paper-units"
 import { CheckIcon, XIcon, SendIcon, ExternalLinkIcon } from "lucide-react"
 
 const STATE_CHIP = {

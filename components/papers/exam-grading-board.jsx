@@ -16,7 +16,7 @@ import { QuestionView } from "@/components/questions/question-view"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SkeletonRows } from "@/components/ui/skeletons"
 import { fmtDateTime } from "@/lib/format"
-import { round2 } from "@/lib/paper-model"
+import { round2, unitLabelsForItem } from "@/lib/paper-units"
 import { qtypeLabel } from "@/lib/question-model"
 import { CheckIcon, Loader2Icon, RefreshCwIcon, ArrowLeftIcon, UsersIcon } from "lucide-react"
 
@@ -84,6 +84,7 @@ function Missing() {
 }
 
 function GradeRow({ item, record, onGraded }) {
+  const unitLabelList = unitLabelsForItem(item, { compact: true })
   const [units, setUnits] = useState(() =>
     (item.score_units ?? [0]).map((u, i) => {
       const given = record?.units?.[i]
@@ -156,12 +157,18 @@ function GradeRow({ item, record, onGraded }) {
 
         <div className="rounded-lg border bg-card p-3">
           <p className="mb-1 text-xs font-medium text-muted-foreground">
-            {item.score_units?.length > 1 ? "逐点给分" : "给分"}
+            {item.score_units?.length > 1
+              ? item.qtype === "composite"
+                ? "逐点给分（小问-空）"
+                : "逐点给分"
+              : "给分"}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {units.map((u, i) => (
               <div key={i} className="flex items-center gap-1">
-                {units.length > 1 && <span className="text-xs text-muted-foreground">{i + 1}.</span>}
+                {units.length > 1 && (
+                  <span className="text-xs text-muted-foreground">{unitLabelList[i] ?? i + 1}</span>
+                )}
                 <Input
                   type="number"
                   min="0"

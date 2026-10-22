@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { PaperItemPreviewDialog } from "@/components/papers/paper-item-preview-dialog"
 import { qtypeShortLabel, difficultyLabel } from "@/lib/question-model"
-import { round2 } from "@/lib/paper-model"
+import { round2 } from "@/lib/paper-units"
 import { HEALTH_LABEL } from "@/lib/paper-workbench"
 import {
   GripVerticalIcon,

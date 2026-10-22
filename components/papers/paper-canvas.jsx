@@ -13,8 +13,8 @@ import { PaperItemCard } from "@/components/papers/paper-item-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { sectionHeading, round2 } from "@/lib/paper-model"
-import { SCORE_MODES } from "@/lib/paper-model"
+import { sectionHeading } from "@/lib/paper-model"
+import { round2, SCORE_MODES } from "@/lib/paper-units"
 import { PlusIcon, Trash2Icon, ArrowUpIcon, ArrowDownIcon } from "lucide-react"
 
 function SectionBlock({

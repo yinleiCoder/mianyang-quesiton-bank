@@ -16,6 +16,7 @@ import { PaperPdfDocument } from "@/components/papers/paper-pdf-document"
 import { registerPdfFonts, missingGlyphs } from "@/lib/pdf-fonts"
 import { collectMediaKeys, collectText, imageBox, imageBytesKind } from "@/lib/pdf-prep"
 import { stripSubNumber, withSubNumber } from "@/lib/question-model"
+import { expandUnits, unitCount, unitLabels, unitLabelsForItem, refineCompositeUnits } from "@/lib/paper-units"
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const OUT = path.join(ROOT, ".next", "pdf-test")
@@ -265,6 +266,41 @@ async function main() {
   ok(stripSubNumber([T("（4）通过计算")])[0].text === "通过计算", "子题自带序号被剥掉")
   ok(stripSubNumber([T("10.5.80.0/22 是子网")])[0].text === "10.5.80.0/22 是子网", "网段/小数不被误剥")
   ok(withSubNumber({ stem: [T("（4）通过计算")] }, 2).stem[0].text === "（2）通过计算", "卷面子题序号统一由渲染器给")
+  // 复合题计分点：per_sub 每个小问的总分不变、均摊到各空；per_blank 每空 score_each。
+  const comp = {
+    sub: [
+      { type: "fill_blank", stem: [T("A ______ B ______")] },
+      { type: "fill_blank", stem: [T("C ______ D ______ E ______")] },
+      { type: "short_answer", stem: [T("谈谈你的理解。")] },
+    ],
+  }
+  ok(unitCount("per_sub", "composite", comp) === 6, "复合题按空拆成 6 个计分点")
+  ok(
+    JSON.stringify(expandUnits({ mode: "per_sub", qtype: "composite", content: comp, scoreEach: 3 })) ===
+      JSON.stringify([1.5, 1.5, 1, 1, 1, 3]),
+    "per_sub 把小问总分均摊到各空"
+  )
+  ok(
+    JSON.stringify(expandUnits({ mode: "per_blank", qtype: "composite", content: comp, scoreEach: 2 })) ===
+      JSON.stringify([2, 2, 2, 2, 2, 2]),
+    "per_blank 复合题每空 score_each"
+  )
+  ok(unitLabels("per_sub", "composite", comp, 6)[3] === "第 2 小问第 2 空", "复合题计分点标签到空")
+  ok(
+    unitLabelsForItem({ qtype: "composite", content: comp, score_units: [1.5, 1.5, 1, 1, 1, 3] }, { compact: true })[3] ===
+      "2-2",
+    "阅卷台标签缩成小问-空"
+  )
+  const refinedFromOne = refineCompositeUnits([6], comp)
+  ok(
+    JSON.stringify(refinedFromOne) === JSON.stringify([1, 1, 0.67, 0.67, 0.66, 2]),
+    "整题分按小问/空细分"
+  )
+  ok(Math.abs(refinedFromOne.reduce((a, b) => a + b, 0) - 6) < 1e-9, "细分后总分不变")
+  ok(
+    JSON.stringify(refineCompositeUnits([3, 3, 3], comp)) === JSON.stringify([1.5, 1.5, 1, 1, 1, 3]),
+    "每个小问的分再按空细分"
+  )
   // 图片字节嗅探：认不出来的必须在抓取阶段拦下，否则渲染阶段会连累整份导出。
   // webp 那条是真踩过的坑——展示地址默认带 format,webp，而 react-pdf 不认 webp。
   ok(imageBytesKind(makePng(4, 4)) === "png", "认得 png")
