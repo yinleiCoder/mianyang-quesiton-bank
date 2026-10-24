@@ -17,6 +17,7 @@ import {
   getBankCount,
   getMyRows,
   getMyWaiting,
+  getPlatformStats,
   getRecent,
   getSchoolStats,
 } from "./_data"
@@ -168,6 +169,37 @@ async function AdminScaleCard() {
       value={`${s.schools} 校 / ${s.users} 人`}
       sub={`${s.nodes} 个科目节点 · ${s.tags} 个标签 · ${s.unassigned} 个待指派任务`}
     />
+  )
+}
+
+// 平台规模：四川全省共享的四个总数。所有角色都能看到同一组数字。
+// 与上面的角色统计卡分开：那几张说的是"我的"，这张说的是"平台"。
+async function PlatformScaleCard() {
+  const s = await getPlatformStats()
+  const items = [
+    { label: "学校", value: s.schools, unit: "所" },
+    { label: "学生", value: s.students, unit: "人" },
+    { label: "教师", value: s.teachers, unit: "人" },
+    { label: "市区", value: s.cities, unit: "个" },
+  ]
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">平台规模</CardTitle>
+        <CardDescription>四川全省共享：学校、学生、教师与市区数量</CardDescription>
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {items.map((it) => (
+          <div key={it.label} className="rounded-xl border bg-muted/20 px-3 py-2.5">
+            <p className="text-xs text-muted-foreground">{it.label}</p>
+            <p className="mt-0.5 text-2xl font-semibold tabular-nums">
+              {Number(it.value) || 0}
+              <span className="ml-0.5 text-xs font-normal text-muted-foreground">{it.unit}</span>
+            </p>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -358,6 +390,11 @@ export default async function DashboardPage() {
           />
         )}
       </div>
+
+      {/* ---------- 平台规模（全体登录用户，四川全省共享） ---------- */}
+      <Suspense fallback={<SectionSkeleton lines={1} />}>
+        <PlatformScaleCard />
+      </Suspense>
 
       {/* ---------- 学校贡献图表（全体登录用户） ---------- */}
       <Suspense fallback={<SectionSkeleton lines={4} />}>

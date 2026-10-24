@@ -21,6 +21,7 @@ import {
   parseAnalyticsFilters,
   percentText,
 } from "@/lib/analytics"
+import { AutoRefresh } from "@/components/analytics/auto-refresh"
 import { BoardTabs } from "@/components/analytics/board-tabs"
 import { ScopeTabs } from "@/components/analytics/scope-tabs"
 import { LeaderboardTable } from "@/components/analytics/leaderboard-table"
@@ -138,6 +139,7 @@ export default async function PaperBoardPage({ params, searchParams }) {
           }
         />
         <BoardTabs {...shared} />
+        <AutoRefresh />
         {needClass ? (
           <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
             你还看不到任何班级（教师需要学校管理员先分配专业与班级）。先切到「全校」「全市」或「全省」。
@@ -189,6 +191,7 @@ export default async function PaperBoardPage({ params, searchParams }) {
         }
       />
       <BoardTabs {...shared} />
+      <AutoRefresh />
 
       {needClass ? (
         <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">

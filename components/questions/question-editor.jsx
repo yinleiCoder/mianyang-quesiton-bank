@@ -391,7 +391,7 @@ export function QuestionEditor({
       return
     }
     if (d.qtype === "composite" && d.subs.length === 0) {
-      toast.warning("复合题请至少添加 1 个子题")
+      toast.warning("综合题请至少添加 1 个子题")
       return
     }
     // 草稿也要结构完整（DB 校验收口）；标签/解析在提交时强校验

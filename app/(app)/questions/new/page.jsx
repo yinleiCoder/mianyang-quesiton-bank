@@ -64,7 +64,7 @@ export default async function NewQuestionPage() {
     <div className="space-y-4">
       <PageHeader
         title="出题"
-        description="六种题型任选；复合题可添加最多 20 道子题（不能嵌套复合题）。草稿与提交都先做内容结构校验，校验规则与入库口径一致。"
+        description="六种题型任选；综合题可添加最多 20 道子题（不能嵌套综合题）。草稿与提交都先做内容结构校验，校验规则与入库口径一致。"
       />
       <QuestionEditor nodes={nodes ?? []} mode="new" />
     </div>

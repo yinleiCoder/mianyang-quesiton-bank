@@ -14,6 +14,7 @@ import { displayEmail, formatPhone } from "@/lib/phone"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ForgettingCurveChart } from "@/components/students/forgetting-curve-chart"
 import {
   Table,
   TableBody,
@@ -141,6 +142,17 @@ export function StudentDetail({ detail, nodes }) {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* 遗忘曲线：把"练了多少"与"记得多牢"分开看。数据是聚合后的分桶，
+          不含任何作答原文（见迁移 0110 的隐私说明）。 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">遗忘曲线（艾宾浩斯）</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ForgettingCurveChart buckets={detail.forgetting_curve ?? []} />
         </CardContent>
       </Card>
 

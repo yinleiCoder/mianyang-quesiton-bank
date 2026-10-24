@@ -260,7 +260,7 @@ export function ImportItemEditor({ item, onClose, onSaved }) {
 
       {qtype === "composite" && (
         <p className="text-xs text-muted-foreground">
-          复合题有 {item.content?.sub?.length ?? 0} 道子题：这里只改材料与解析，子题请入库后在编辑器里调整。
+          综合题有 {item.content?.sub?.length ?? 0} 道子题：这里只改材料与解析，子题请入库后在编辑器里调整。
         </p>
       )}
 

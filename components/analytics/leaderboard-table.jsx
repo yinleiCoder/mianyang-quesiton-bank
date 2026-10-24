@@ -6,9 +6,11 @@ import { fmtDuration, rankTone } from "@/lib/analytics"
 // 榜单表格。纯 CSS，不引 recharts——这一页全是文字与数字，扛一个 300KB 的图表库不划算
 // （components/students/student-detail.jsx 的头注已经把这条教训写死了）。
 //
-// 四档口径共用一张表，只是"次要那一列"不同：班级榜看班级、全校/全市/全省看学校。
-// 学校名一律显示（用户明确要求"排行应标注出学校信息"）。
-function Row({ row, showSchool }) {
+// 四档口径共用一张表：
+//   · 班级**始终显示**（用户 2026-10-24：全校/全市/全省也要能看出是哪个班）；
+//   · 全校/全市/全省再显示学校与市区（市区来自 paper_leaderboard 的 city_name，
+//     见迁移 0112）。学校名一律显示（用户明确要求"排行应标注出学校信息"）。
+function Row({ row, showSchool, showCity }) {
   const name = row.name ?? "（已注销）"
   return (
     <li
@@ -31,9 +33,19 @@ function Row({ row, showSchool }) {
         <span className="font-medium">{name}</span>
         {row.is_me && <span className="ml-1 text-xs text-primary">（我）</span>}
       </span>
-      <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground sm:block">
-        {showSchool ? row.school_name : row.class_name || row.school_name}
+      <span className="w-28 shrink-0 truncate text-xs text-muted-foreground">
+        {row.class_name || "未分班"}
       </span>
+      {showSchool && (
+        <span className="hidden w-32 shrink-0 truncate text-xs text-muted-foreground md:block">
+          {row.school_name || "—"}
+        </span>
+      )}
+      {showCity && (
+        <span className="hidden w-20 shrink-0 truncate text-xs text-muted-foreground md:block">
+          {row.city_name || "—"}
+        </span>
+      )}
       <span className="w-24 shrink-0 text-right tabular-nums">
         <b className="font-medium">{Number(row.score)}</b>
         <span className="text-muted-foreground">/{Number(row.full_score)}</span>
@@ -50,7 +62,10 @@ function Row({ row, showSchool }) {
 
 export function LeaderboardTable({ board }) {
   const rows = board?.rows ?? []
-  const showSchool = (board?.scope?.key ?? "class") !== "class"
+  const scopeKey = board?.scope?.key ?? "class"
+  const showSchool = scopeKey !== "class"
+  // 班级榜本身就在一个班里，再显示市区没有信息量；全校及以上才显示。
+  const showCity = scopeKey !== "class"
 
   // 我不在前 N（榜单被 limit 截断）时，把"我"和左右各一名的 nearBy 补在表尾，
   // 否则第 204 名的人从头翻到尾也找不到自己。
@@ -72,14 +87,16 @@ export function LeaderboardTable({ board }) {
         <span className="w-7 shrink-0 text-center">名次</span>
         <span className="w-7 shrink-0" />
         <span className="min-w-0 flex-1">学生</span>
-        <span className="hidden min-w-0 flex-1 sm:block">{showSchool ? "学校" : "班级"}</span>
+        <span className="w-28 shrink-0">班级</span>
+        {showSchool && <span className="hidden w-32 shrink-0 md:block">学校</span>}
+        {showCity && <span className="hidden w-20 shrink-0 md:block">市区</span>}
         <span className="w-24 shrink-0 text-right">得分</span>
         <span className="hidden w-16 shrink-0 text-right sm:block">用时</span>
         <span className="hidden w-28 shrink-0 text-right lg:block">交卷时间</span>
       </div>
       <ul className="divide-y">
         {rows.map((row) => (
-          <Row key={row.user_id} row={row} showSchool={showSchool} />
+          <Row key={row.user_id} row={row} showSchool={showSchool} showCity={showCity} />
         ))}
       </ul>
 
@@ -90,7 +107,7 @@ export function LeaderboardTable({ board }) {
           </p>
           <ul className="divide-y">
             {nearby.map((row) => (
-              <Row key={row.user_id} row={row} showSchool={showSchool} />
+              <Row key={row.user_id} row={row} showSchool={showSchool} showCity={showCity} />
             ))}
           </ul>
         </>

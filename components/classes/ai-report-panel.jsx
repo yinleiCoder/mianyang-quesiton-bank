@@ -55,16 +55,35 @@ export function AiReportPanel({ paperId, classId, initial, paperTitle }) {
       const { data, error: loadErr } = await loadClassAiPayload(supabase, { paperId, classId })
       if (loadErr || !data) throw new Error(loadErr?.message || "取不到这次考试的数据")
 
-      // 2) 调模型
-      const res = await callChat({
-        messages: buildAiReportMessages(data.payload, { progressNote: note }),
-        apiKey,
-        model,
-        maxTokens: 8000,
-      })
-      const check = validateAiReport(salvageJson(res.content))
-      if (!check.ok) {
-        setError(`模型没有按格式返回（${check.reason}）。再点一次「生成」通常会好。`)
+      // 2) 调模型。**空 content / 非 JSON 要自动重试**：
+      // 官方 JSON Output 有概率返回空字符串（import-parse 里也记着同一条），
+      // 第一次分析就撞上时，教师看到的是"模型没有生成 json"；重试一次通常就好了。
+      // 这里最多尝试 3 次，中间隔 0.8s，全部失败才把原因交给页面。
+      const messages = buildAiReportMessages(data.payload, { progressNote: note })
+      let check = null
+      let lastReason = "模型没有返回 json 对象"
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 800 * attempt))
+        const res = await callChat({
+          messages,
+          apiKey,
+          model,
+          // 新增了成绩分布/题型难度/学生分层/错误归因/主观题层级/行动方案，
+          // 8000 在长报告上可能被截断；12000 仍远低于上游上限。
+          maxTokens: 12000,
+        })
+        check = validateAiReport(salvageJson(res.content))
+        if (check.ok) break
+        lastReason = res.finishReason === "length"
+          ? "模型输出被截断"
+          : check.reason
+        // 空内容是最常见的瞬时问题；非空但格式不对也值得再试一次
+      }
+      if (!check?.ok) {
+        setError(
+          `模型连续 3 次没有按格式返回（${lastReason}）。` +
+          "可以稍后再点一次「生成」，或换一个模型试试。"
+        )
         return
       }
 
@@ -118,7 +137,8 @@ export function AiReportPanel({ paperId, classId, initial, paperTitle }) {
         ) : (
           <p className="text-sm text-muted-foreground">
             还没有生成过分析。点下面的按钮，AI 会读这份卷子的<b>全班作答</b>（逐题正确率、选项分布、
-            知识点），给你一份整体表现 + 知识点掌握 + 易错短板 + 下一步复习的建议。
+            题型与难度、学生分层、主观题样本、时间与空答情况），给你一份成绩分布 + 知识点掌握 +
+            典型错误归因 + 学生分层 + 课堂改进行动（带可验证指标）的报告。
           </p>
         )}
 

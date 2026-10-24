@@ -106,15 +106,19 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
     setRows(next)
   }
 
-  async function run(kind) {
-    if (!pending) return
-    const { row } = pending
+  // **row 直接由调用方传进来，不再只依赖 pending 状态**：
+  // 确认框是条件挂载的，React Compiler 记忆化的闭包偶尔会拿着上一次的 pending
+  // （null）进来，于是"确认恢复"点了像没反应 —— 2026-10-24 用户报的就是这个。
+  // 把本次操作的行作为参数显式传下去，闭包拿错状态也不会影响真正要操作的那一行。
+  async function run(kind, targetRow) {
+    const row = targetRow ?? pending?.row
+    if (!row) return
     const qid = row.question.id
     // 行内动作 → RPC 与参数（版本级：提交/撤回；题目级：删除/上下线申请）
     const action = {
-      submit: { fn: "submit_question", arg: { p_version_id: row.working.id } },
-      retract: { fn: "retract_question", arg: { p_version_id: row.working.id } },
-      restoreVersion: { fn: "restore_retracted_question", arg: { p_version_id: row.latest.id } },
+      submit: { fn: "submit_question", arg: { p_version_id: row.working?.id } },
+      retract: { fn: "retract_question", arg: { p_version_id: row.working?.id } },
+      restoreVersion: { fn: "restore_retracted_question", arg: { p_version_id: row.latest?.id } },
       delete: { fn: "delete_question_draft", arg: { p_question_id: qid } },
       offline: {
         fn: "request_question_state_change",
@@ -126,27 +130,40 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
       },
     }[kind]
 
-    setBusyId(qid)
-    const supabase = createClient()
-    const { error } = await supabase.rpc(action.fn, action.arg)
-    setBusyId(null)
-    setPending(null)
-    if (error) {
-      toast.error(error.message)
+    // 参数缺 id 时当场说清楚，别给一条指向 undefined 的请求
+    if (!action || Object.values(action.arg).some((v) => v === undefined)) {
+      toast.error("这条记录缺少可操作的版本，请刷新页面后重试")
+      setPending(null)
       return
     }
-    toast.success({
-      submit: "已提交审核",
-      retract: "已撤回",
-      restoreVersion: "已恢复为草稿，可以继续修改",
-      delete: "已删除",
-      offline: "下线申请已提交，等待教研组长审批",
-      restore: "恢复申请已提交，等待教研组长审批",
-    }[kind])
-    await refresh()
-    // 撤回/恢复之后版本回到 draft：留在「审核中」页签会让这一行凭空消失，
-    // 老师会以为题丢了。切到草稿页签，行和它的「编辑 / 提交审核」就在眼前。
-    if (kind === "retract" || kind === "restoreVersion") setFilter("draft")
+
+    setBusyId(qid)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.rpc(action.fn, action.arg)
+      if (error) {
+        toast.error(error.message)
+        return
+      }
+      toast.success({
+        submit: "已提交审核",
+        retract: "已撤回",
+        restoreVersion: "已恢复为草稿，可以继续修改",
+        delete: "已删除",
+        offline: "下线申请已提交，等待教研组长审批",
+        restore: "恢复申请已提交，等待教研组长审批",
+      }[kind])
+      await refresh()
+      // 撤回/恢复之后版本回到 draft：留在「审核中」页签会让这一行凭空消失，
+      // 老师会以为题丢了。切到草稿页签，行和它的「编辑 / 提交审核」就在眼前。
+      if (kind === "retract" || kind === "restoreVersion") setFilter("draft")
+    } catch (err) {
+      // 网络异常/客户端异常也要给一句话，不能让按钮看起来"点了没反应"
+      toast.error(err?.message ?? "操作失败，请稍后重试")
+    } finally {
+      setBusyId(null)
+      setPending(null)
+    }
   }
 
   /* ---------- 批量动作 ---------- */
@@ -321,7 +338,7 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
           description={CONFIRM_TEXT[pending.kind].desc(pending.row)}
           confirmText={CONFIRM_TEXT[pending.kind].action}
           busy={busyId !== null}
-          onConfirm={() => run(pending.kind)}
+          onConfirm={() => run(pending.kind, pending.row)}
           onClose={() => setPending(null)}
         />
       )}

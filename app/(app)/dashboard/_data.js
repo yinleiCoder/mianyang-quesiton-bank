@@ -69,6 +69,14 @@ export const getAdminStats = cache(async () => {
   }
 })
 
+// 平台规模（0114 的 platform_stats）：学校 / 学生 / 教师 / 市区。
+// 走 SECURITY DEFINER RPC：profiles 的 RLS 只让看本人/同校，直接 count 会数少。
+export const getPlatformStats = cache(async () => {
+  const { data, error } = await (await createClient()).rpc("platform_stats")
+  if (error) throw error
+  return data ?? { schools: 0, students: 0, teachers: 0, cities: 0 }
+})
+
 export const getRecent = cache(async () => {
   const supabase = await createClient()
   const { data, error } = await supabase
