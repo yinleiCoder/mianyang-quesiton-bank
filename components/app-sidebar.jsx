@@ -49,6 +49,7 @@ import {
   ListChecksIcon,
   LogOutIcon,
   MapPinIcon,
+  MegaphoneIcon,
   MessageSquareIcon,
   ScrollTextIcon,
   SparklesIcon,
@@ -127,6 +128,12 @@ function useNavItems(
       url: "/showcase/animation",
       icon: ClapperboardIcon,
       tooltip: "软件架构及人员管理动画",
+    },
+    {
+      title: "软件宣传展示",
+      url: "/showcase/promo",
+      icon: MegaphoneIcon,
+      tooltip: "软件宣传展示",
     },
     // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
     // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
