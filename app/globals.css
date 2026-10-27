@@ -131,13 +131,51 @@
 /* 打印：试卷/题目打印页共用 A4 版式。
    放在 @layer base 之外，确保打印时不被 Tailwind 的工具类优先级盖掉。 */
 @media print {
+  /* 标准考试卷：A4 纵向，上下 18mm、左右 16mm（装订侧留够位置）。
+     显式写 portrait 与"整个页面"的尺寸，避免打印对话框沿用打印机的 Letter 默认。 */
   @page {
-    size: A4;
-    margin: 16mm 14mm;
+    size: A4 portrait;
+    margin: 18mm 16mm 16mm;
+    /* 页脚页码。Chrome 131+ 支持 @page 外边距框，不支持的浏览器整块忽略——
+       正文因此不会因为这条规则变形。 */
+    @bottom-center {
+      content: "第 " counter(page) " 页 / 共 " counter(pages) " 页";
+      font-size: 9pt;
+      color: #555;
+    }
   }
   /* 深色主题下打印会得到白字白底，强制回黑字白底 */
   html, body {
     background: #fff !important;
     color: #000 !important;
+  }
+  /* body 在屏幕上是 flex 容器（app/layout.js：min-h-full flex flex-col）。
+     Chromium 对"跨页的 flex 子项"曾经出现过整块压在页底、与后文重叠的问题；
+     打印时退回普通块流，分页由文档流自己决定。 */
+  body {
+    display: block !important;
+  }
+  /* 应用外壳不进纸面。侧栏在屏幕上是 position:fixed（components/ui/sidebar.jsx），
+     而 fixed 元素在打印时会**在每一页重复出现、压住正文** —— 从组卷页直接 Ctrl+P
+     打卷子的人看到的就是"题目和东西重叠"。专用打印路由本来就没有侧栏，
+     这两条只影响从应用内页直接打印的情况。 */
+  [data-slot="sidebar"],
+  [data-slot="sidebar-trigger"],
+  [data-slot="sidebar-rail"],
+  /* 屏幕上的浮层同理：toast 是 position:fixed，正好盖在纸上 */
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+  /* 图片不许跨页拆开，也不许超出正文宽度（题目/材料图是最常见的重叠源） */
+  img, svg, video, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* 用背景色表达的信息（答案高亮、卷首说明底色）默认不印，但也不能印成灰块 */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

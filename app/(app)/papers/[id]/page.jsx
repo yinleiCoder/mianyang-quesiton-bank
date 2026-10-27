@@ -281,7 +281,8 @@ export default async function PaperDetailPage({ params }) {
         </div>
       )}
 
-      <div className="rounded-xl border bg-white p-6 text-black sm:p-8">
+      {/* 从本页直接 Ctrl+P 时也按 A4 卷面印：去掉卡片边框与内边距（专用打印路由见 /print/paper） */}
+      <div className="rounded-xl border bg-white p-6 text-black sm:p-8 print:rounded-none print:border-0 print:p-0">
         <PaperSheet snapshot={snapshot} mode="paper" />
       </div>
     </div>

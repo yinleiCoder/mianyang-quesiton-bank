@@ -10,7 +10,8 @@ export function QuestionReader({ qtype, content, defaultShow = true }) {
   const [show, setShow] = useState(defaultShow)
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      {/* 打印时必须藏掉：这是屏幕上的开关，印在纸上只是一颗没用的按钮 */}
+      <div className="flex justify-end print:hidden">
         <Button size="sm" variant="ghost" onClick={() => setShow((v) => !v)}>
           {show ? (
             <>

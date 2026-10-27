@@ -14,7 +14,14 @@ import React from "react"
 import { renderToFile } from "@react-pdf/renderer"
 import { PaperPdfDocument } from "@/components/papers/paper-pdf-document"
 import { registerPdfFonts, missingGlyphs } from "@/lib/pdf-fonts"
-import { collectMediaKeys, collectText, imageBox, imageBytesKind } from "@/lib/pdf-prep"
+import {
+  canKeepTogether,
+  collectMediaKeys,
+  collectText,
+  estimateContentHeight,
+  imageBox,
+  imageBytesKind,
+} from "@/lib/pdf-prep"
 import { stripSubNumber, withSubNumber } from "@/lib/question-model"
 import { expandUnits, unitCount, unitLabels, unitLabelsForItem, refineCompositeUnits } from "@/lib/paper-units"
 
@@ -211,6 +218,62 @@ function images() {
   return new Map([["qbank/2026/demo-1.png", { src: `data:image/png;base64,${png.toString("base64")}`, width: 400, height: 200 }]])
 }
 
+// 一道**比一整页还高**的复合题（真实卷子里就有：材料图 + 6~8 个小问 + 答案与解析）。
+// 这是 2026-10-27 用户报的"打印出来题目与图片互相重叠"的根因：
+// react-pdf 对 wrap={false} 的节点没有"太高就拆开"的退路，整块压在页底溢出。
+// 用它与下面那组断言钉住两件事：不许再出现 react-pdf 的溢出警告，成品里不许有文字重叠。
+const LONG_SNAPSHOT = {
+  title: "长复合题压测卷",
+  exam_name: "压测",
+  total_score: 40,
+  duration_minutes: 60,
+  header: {},
+  instructions: [T("说明")],
+  sections: [
+    {
+      id: "s1",
+      title: "材料分析题",
+      score_each: 40,
+      section_score: 40,
+      items: [
+        {
+          id: "long1",
+          seq: 1,
+          qtype: "composite",
+          score: 40,
+          content: {
+            stem: [
+              T(
+                "阅读下面的材料，完成后面的题目。\n" +
+                  Array.from(
+                    { length: 8 },
+                    (_, i) => `（${i + 1}）材料第 ${i + 1} 段说明了系统配置与地址规划中的一项约束，请据此作答。`
+                  ).join("\n")
+              ),
+              IMG("qbank/2026/tall.png", "材料图"),
+            ],
+            sub: Array.from({ length: 8 }, (_, i) => ({
+              type: "fill_blank",
+              stem: [
+                T(
+                  `（${i + 1}）在本题材料中，第 ${i + 1} 台设备的接口地址应配置为 ______ ，` +
+                    `对应的子网掩码是 ______ ，下一跳地址是 ______ ，请写出完整配置命令并说明理由。`
+                ),
+              ],
+              answer: { values: [`192.168.${i + 1}.1/24`, "255.255.255.0", "192.168.1.254"] },
+            })),
+            analysis: [T("本题综合考查材料阅读与配置计算，按空给分。")],
+          },
+        },
+      ],
+    },
+  ],
+}
+function longImages() {
+  const png = makePng(300, 800) // 竖图：按高度上限 320pt 摆，占掉近半页
+  return new Map([["qbank/2026/tall.png", { src: `data:image/png;base64,${png.toString("base64")}`, width: 300, height: 800 }]])
+}
+
 // 正文盒子的右边界：A4 宽 595.28 − 左右各 40 的内边距。文字一旦越过它，
 // 就是"没换行、被裁掉了"——这是中文排版最容易出、也最不显眼的故障。
 const RIGHT_EDGE = 595.28 - 40 + 2
@@ -222,12 +285,38 @@ async function extract(file) {
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await (await import("node:fs/promises")).readFile(file)) }).promise
   const pages = []
   const lines = []
+  const overlaps = []
   let images = 0
   const OPS = pdfjs.OPS
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const tc = await page.getTextContent()
     pages.push(tc.items.map((it) => it.str).join(""))
+    // 文字互相重叠：两个文字碎片的包围盒相交超过较小那个的 30%。
+    // 只比对**多字**碎片，单字交集是标点/缺字的宽度假阳性（实测 0.5 的比值
+    // 来自全角标点的字形宽度，不是排版重叠）。
+    const rects = tc.items
+      .filter((it) => it.str && it.str.trim().length > 1)
+      .map((it) => ({
+        str: it.str,
+        x1: it.transform[4],
+        y1: it.transform[5],
+        x2: it.transform[4] + (it.width || 0),
+        y2: it.transform[5] + (it.height || Math.abs(it.transform[3]) || 0),
+      }))
+    for (let a = 0; a < rects.length; a++) {
+      for (let b = a + 1; b < rects.length; b++) {
+        const r = rects[a]
+        const s = rects[b]
+        const w = Math.min(r.x2, s.x2) - Math.max(r.x1, s.x1)
+        const h = Math.min(r.y2, s.y2) - Math.max(r.y1, s.y1)
+        if (w <= 1 || h <= 1) continue
+        const small = Math.min((r.x2 - r.x1) * (r.y2 - r.y1), (s.x2 - s.x1) * (s.y2 - s.y1))
+        if (small > 0 && (w * h) / small > 0.3) {
+          overlaps.push({ page: i, a: r.str, b: s.str })
+        }
+      }
+    }
     // 按 y 坐标把文字碎片归成"行"，用来验换行与行首禁则
     const byLine = new Map()
     for (const it of tc.items) {
@@ -247,7 +336,7 @@ async function extract(file) {
     const ops = await page.getOperatorList()
     images += ops.fnArray.filter((f) => f === OPS.paintImageXObject || f === OPS.paintImageXObjectRepeat).length
   }
-  return { pages, lines, images }
+  return { pages, lines, images, overlaps }
 }
 
 async function main() {
@@ -312,6 +401,17 @@ async function main() {
     "webp 被认出来（=会被拦下，退化成一行说明）"
   )
   ok(imageBytesKind(new TextEncoder().encode("<html><body>404")) === "unknown", "HTML 错误页被认出来")
+  // 能否整块留在同一页：短题必须留（wrap=false），比一页高的复合题必须允许跨页
+  const longItem = LONG_SNAPSHOT.sections[0].items[0]
+  ok(canKeepTogether(SNAPSHOT.sections[0].items[0], { images: images() }), "短题整块留在同一页")
+  ok(
+    estimateContentHeight(longItem.content, { qtype: "composite", withAnswers: true, images: longImages() }) > 700,
+    "长复合题的高度估算超过一页"
+  )
+  ok(
+    !canKeepTogether(longItem, { withAnswers: true, images: longImages() }),
+    "长复合题不再强制整块（否则 react-pdf 会溢出重叠）"
+  )
 
   // 取图地址必须是 raw 档（只缩放）：默认档带 format,webp，reace-pdf 不认
   process.env.NEXT_PUBLIC_OSS_PUBLIC_HOST = "oss.test"
@@ -330,7 +430,7 @@ async function main() {
     const file = path.join(OUT, `${mode}.pdf`)
     await renderToFile(React.createElement(PaperPdfDocument, { snapshot: SNAPSHOT, mode, images: images() }), file)
     const { size } = await (await import("node:fs/promises")).stat(file)
-    const { pages, lines, images: imgCount } = await extract(file)
+    const { pages, lines, images: imgCount, overlaps } = await extract(file)
     const text = pages.join("\n")
 
     console.log(`\n${mode === "paper" ? "正卷" : "参考答案"}（${pages.length} 页，${Math.round(size / 1024)} KB）`)
@@ -342,6 +442,10 @@ async function main() {
     ok(text.includes("职教高考联盟"), "页脚署名在")
     ok(text.includes("第 1 /"), "页码在")
     ok(imgCount >= 1, "题干里的图片被嵌进 PDF")
+    ok(
+      overlaps.length === 0,
+      `没有文字互相重叠${overlaps.length ? `（${overlaps[0].page} 页：${overlaps[0].a} / ${overlaps[0].b}）` : ""}`
+    )
     ok(text.includes("［本题含音频"), "音频块退化成一行说明而不是消失")
     ok(text.includes("［图片：取不到的图未能载入］"), "取不到的图退化成一行说明")
     ok(text.includes("[[图1]]") || text.includes("图1"), "[[图N]] 占位原样保留（提醒补图）")
@@ -369,6 +473,34 @@ async function main() {
       ok(text.includes("分数构成"), "答案版卷末有分数速查表")
       ok(text.includes("参考答案"), "页脚标了参考答案")
     }
+  }
+
+  // ---- 回归：比一页高的复合题会溢出重叠 ----
+  // react-pdf 对 wrap=false 且高于整页的节点只 console.warn 一句，PDF 照样生成，
+  // 所以必须既抓警告、又量成品里的文字包围盒。旧版这两条都会失败。
+  {
+    const file = path.join(OUT, "long.pdf")
+    const warnings = []
+    const origWarn = console.warn
+    console.warn = (...args) => warnings.push(args.join(" "))
+    try {
+      await renderToFile(
+        React.createElement(PaperPdfDocument, { snapshot: LONG_SNAPSHOT, mode: "answers", images: longImages() }),
+        file
+      )
+    } finally {
+      console.warn = origWarn
+    }
+    const { pages, overlaps } = await extract(file)
+    const text = pages.join("\n")
+    console.log(`\n长复合题（${pages.length} 页）`)
+    ok(!warnings.some((w) => w.includes("can't wrap between pages")), "没有触发 react-pdf 的溢出警告")
+    ok(pages.length > 1, "长复合题确实跨页（否则这条回归测不到东西）")
+    ok(text.includes("第 8 台设备的接口地址"), "最后一个子题落在 PDF 里（整块没有被裁掉）")
+    ok(
+      overlaps.length === 0,
+      `长复合题没有文字重叠${overlaps.length ? `（${overlaps[0].page} 页：${overlaps[0].a} / ${overlaps[0].b}）` : ""}`
+    )
   }
 
   console.log(`\n${failed === 0 ? "全部通过" : `${failed} 项失败`}（产物在 .next/pdf-test/）`)

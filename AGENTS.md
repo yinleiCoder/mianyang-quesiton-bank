@@ -75,8 +75,23 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   而 react-pdf 不认 webp，整份导出会挂（不是那一张图降级）。`lib/pdf-prep.js` 另外按
   魔术字节嗅探兜底，认不出来的图退化成一行说明文字。
 
-自检：`npm run test:pdf`（在 node 里渲染真 PDF 再用 pdfjs 抽回文字核对，37 项断言）；
-浏览器端用 `/dev-pdf-export` 与 `/dev-approval-flow` 两个夹具页（都不需要登录）。
+自检：`npm run test:pdf`（在 node 里渲染真 PDF 再用 pdfjs 抽回文字与文字包围盒核对，
+含「长复合题不重叠」回归）；浏览器端用 `/dev-pdf-export` 与 `/dev-approval-flow`
+两个夹具页（都不需要登录）。
+
+### 2026-10-27 修的两颗雷（打印重叠 / 行距）
+
+- **`wrap={false}` 的题项高过一整页 = 溢出重叠**：react-pdf 只打一句 `console.warn`，
+  PDF 照样生成，纸上后一题会画在前一题上面（真实的材料分析题 + 图 + 5~6 个小问就会超）。
+  `lib/pdf-prep.js` 的 `canKeepTogether()` 先估高度，超过 700pt 就不给 `wrap={false}`；
+  回归在 `npm run test:pdf` 的「长复合题」一组（同时抓警告与文字包围盒）。
+- **无单位 `lineHeight` 乘的是"处理这条样式时能看到的 fontSize"**：只写在 View 上、
+  没写 fontSize 时乘的是默认 18 而不是继承的 10.5 —— 行距 28.8pt，一本卷子印出 28 页。
+  `S.body` 必须同时写 `fontSize: 10.5` 与 `lineHeight: 1.6`。
+- **网页打印的 A4 版式**在 `app/globals.css` 的 `@media print`：`@page size A4 portrait`、
+  上下 18mm / 左右 16mm、页码走 `@bottom-center` 的 `counter(page)/counter(pages)`
+  （Chrome 131+ 支持，其余浏览器整块忽略），并强制 `body { display: block }`
+  —— 屏幕上的 body 是 flex，跨页的 flex 子项曾是重叠来源。
 
 ## 教学动画空间（做过，2026-10-09 掐掉了）
 

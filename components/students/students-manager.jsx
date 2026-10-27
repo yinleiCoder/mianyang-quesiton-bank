@@ -35,9 +35,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { EmptyState } from "@/components/empty-state"
-import { Loader2Icon, SearchIcon, UserRoundPenIcon, GraduationCapIcon } from "lucide-react"
+import {
+  Loader2Icon,
+  SearchIcon,
+  UserRoundPenIcon,
+  GraduationCapIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 export function StudentsManager({ rows, classes, schools, filters, caller, hasFilters, total }) {
   const router = useRouter()
@@ -46,6 +62,8 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
   const [selected, setSelected] = useState(() => new Set())
   const [assignOpen, setAssignOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [delBusy, setDelBusy] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const schoolMap = useMemo(() => new Map((schools ?? []).map((s) => [s.id, s.name])), [schools])
@@ -105,6 +123,26 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
       (supabase) => supabase.rpc("admin_bulk_assign_class", { p_user_ids: ids, p_class_id: classId }),
       `已把 ${ids.length} 名学生归入班级`
     )
+  }
+
+  // 删除学生账号：走 admin_delete_user（0022/0058 已把"本校学校管理员可删除本校用户"
+  // 写进 RPC）。它是**不可恢复**的，所以只从单行入口进，不放进批量操作条——
+  // 批量删除点错一次就是一整个班。
+  async function doDelete() {
+    if (!deleting) return
+    setDelBusy(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.rpc("admin_delete_user", { p_user_id: deleting.user_id })
+      if (error) throw error
+      toast.success(`已删除学生「${deleting.name || "未命名"}」`)
+      setDeleting(null)
+      router.refresh()
+    } catch (e) {
+      toast.error(e?.message ?? "删除失败")
+    } finally {
+      setDelBusy(false)
+    }
   }
 
   const classRollup = selectedClass ? classSummary(selectedClass) : null
@@ -331,14 +369,25 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
                           查看学情
                         </Button>
                         {canManage && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setEditing(r)}
-                            title="修改班级与入学年份"
-                          >
-                            <UserRoundPenIcon className="size-4" />
-                          </Button>
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setEditing(r)}
+                              title="修改班级与入学年份"
+                            >
+                              <UserRoundPenIcon className="size-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => setDeleting(r)}
+                              title="删除学生账号"
+                            >
+                              <Trash2Icon className="size-4" />
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -377,6 +426,32 @@ export function StudentsManager({ rows, classes, schools, filters, caller, hasFi
             )
           }
         />
+      )}
+      {deleting && (
+        <AlertDialog open onOpenChange={(o) => !o && !delBusy && setDeleting(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>删除学生「{deleting.name || "未命名"}」？</AlertDialogTitle>
+              <AlertDialogDescription className="whitespace-pre-wrap">
+                该操作不可恢复：账号、档案与这个学生的练习/考试记录会一并删除。
+                题库里的题目不受影响。{deleting.class_name ? `删除后将不在「${deleting.class_name}」里。` : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={delBusy}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={delBusy}
+                onClick={(e) => {
+                  e.preventDefault()
+                  doDelete()
+                }}
+              >
+                {delBusy && <Loader2Icon className="size-4 animate-spin" />}
+                确认删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   )

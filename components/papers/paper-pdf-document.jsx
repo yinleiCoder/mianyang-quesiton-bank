@@ -9,7 +9,12 @@
 // 答案版是另一个入口、另一份文档（同 app/print/paper/[id]/answers 的取舍）。
 import { Document, Page, Text, View, Image, StyleSheet } from "@react-pdf/renderer"
 import { CJK_FONT } from "@/lib/pdf-fonts"
-import { imageBox, printableText } from "@/lib/pdf-prep"
+import {
+  canKeepTogether,
+  imageBox,
+  printableText,
+  OPTION_IMAGE_MAX_WIDTH,
+} from "@/lib/pdf-prep"
 import { blocksToText, withSubNumber } from "@/lib/question-model"
 import { cnNumeral, sectionHeading } from "@/lib/paper-model"
 import { round2 } from "@/lib/paper-units"
@@ -26,7 +31,11 @@ const S = StyleSheet.create({
     paddingBottom: 46,
     paddingHorizontal: 40,
   },
-  body: { lineHeight: 1.6 },
+  // ⚠ fontSize 必须和 lineHeight 写在同一层：react-pdf 把**无单位**的 lineHeight
+  // 乘的是"处理这条样式时能看到的 fontSize"，而 View 上看不到 Page 继承下来的 10.5，
+  // 会退回默认的 18 —— 行距变成 1.6×18=28.8pt（正文看起来像双倍行距，一本卷子印出
+  // 28 页）。显式写 fontSize 才有正常的 16.8pt（2026-10-27 实测并修正）。
+  body: { fontSize: 10.5, lineHeight: 1.6 },
   head: { marginBottom: 14, paddingBottom: 10, borderBottom: "1 solid #0000004d", textAlign: "center" },
   examName: { fontSize: 12 },
   title: { fontSize: 16, fontWeight: 700, marginTop: 3 },
@@ -64,7 +73,7 @@ const S = StyleSheet.create({
 
 // 区块渲染：文本直接排，图片嵌进去，音频/视频/附件在纸上没法呈现——留一行说明，
 // 总比网页打印时"呼啦一下整块消失"强（那条路现在就是这个效果）。
-function Blocks({ blocks, images }) {
+function Blocks({ blocks, images, imageMaxWidth = 420 }) {
   const list = Array.isArray(blocks) ? blocks : []
   return (
     <>
@@ -88,7 +97,8 @@ function Blocks({ blocks, images }) {
             </Text>
           )
         }
-        const box = imageBox(img.width, img.height)
+        // 宽高上限跟着容器走：选项格只有半行宽，按整页上限 420 摆会压到隔壁选项
+        const box = imageBox(img.width, img.height, Math.min(imageMaxWidth, 420))
         return <Image key={i} src={img.src} style={[S.image, { width: box.width, height: box.height }]} />
       })}
     </>
@@ -124,7 +134,7 @@ function OptionRows({ options, answerKeys, showAnswer, images }) {
                 {cell.key}.
               </Text>
               <View style={S.optionText}>
-                <Blocks blocks={cell.blocks} images={images} />
+                <Blocks blocks={cell.blocks} images={images} imageMaxWidth={OPTION_IMAGE_MAX_WIDTH} />
               </View>
             </View>
           ))}
@@ -147,7 +157,18 @@ function Body({ qtype, content, showAnswer, images }) {
       <View>
         {blocksToText(c.stem).trim() ? <Blocks blocks={c.stem} images={images} /> : null}
         {subs.map((sub, i) => (
-          <View key={i} style={{ marginTop: 4 }}>
+          // 小问各自尽量整块留在同一页（拆在小题之间比拆在句子中间好读）；
+          // 但小问自己高过一页时就必须允许跨页，否则又会叠在一起
+          <View
+            key={i}
+            style={{ marginTop: 4 }}
+            {...(canKeepTogether(
+              { qtype: sub.type, content: withSubNumber(sub, i + 1) },
+              { withAnswers: showAnswer, images }
+            )
+              ? { wrap: false }
+              : {})}
+          >
             {/* 序号并进题干第一段：单独一行会像"只有编号、没有题干"，也会和题干里
                 自带的「（4）」叠成两个。withSubNumber 先剥自带序号再补渲染器序号。 */}
             <Body
@@ -291,7 +312,13 @@ export function PaperPdfDocument({ snapshot, mode = "paper", images }) {
               {sec.instruction ? <Text style={S.sectionNote}>{printableText(sec.instruction)}</Text> : null}
               {(sec.items ?? []).map((it, ii) =>
                 withAnswers ? (
-                  <View key={it.id ?? ii} style={S.answerBlock} wrap={false}>
+                  // wrap={false} 只在"这题放得下一页"时才给：比一页还高时 react-pdf
+                  // 没有退路，会把整块压在页底溢出并与后续题目重叠（见 lib/pdf-prep.js）
+                  <View
+                    key={it.id ?? ii}
+                    style={S.answerBlock}
+                    {...(canKeepTogether(it, { withAnswers, images }) ? { wrap: false } : {})}
+                  >
                     <Text style={S.answerHead}>
                       {it.seq}. （{round2(it.score)} 分
                       {it.score_units?.length > 1 ? `，共 ${it.score_units.length} 个给分点` : ""}）
@@ -304,7 +331,11 @@ export function PaperPdfDocument({ snapshot, mode = "paper", images }) {
                     )}
                   </View>
                 ) : (
-                  <View key={it.id ?? ii} style={S.item} wrap={false}>
+                  <View
+                    key={it.id ?? ii}
+                    style={S.item}
+                    {...(canKeepTogether(it, { withAnswers, images }) ? { wrap: false } : {})}
+                  >
                     <Text style={S.seq}>{it.seq}.</Text>
                     <View style={S.itemBody}>
                       <Body qtype={it.qtype} content={it.content} images={images} />

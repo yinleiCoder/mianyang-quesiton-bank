@@ -35,7 +35,7 @@ export default async function AppLayout({ children }) {
         <AppSidebarData />
       </Suspense>
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 print:hidden">
           <SidebarTrigger className="-ml-1" />
           <Separator
             orientation="vertical"
@@ -43,7 +43,7 @@ export default async function AppLayout({ children }) {
           />
           <AppBreadcrumb />
         </header>
-        <main className="flex flex-1 flex-col gap-6 p-4 lg:p-6">{children}</main>
+        <main className="flex flex-1 flex-col gap-6 p-4 lg:p-6 print:p-0">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   )
