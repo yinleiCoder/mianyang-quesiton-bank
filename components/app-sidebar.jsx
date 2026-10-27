@@ -35,6 +35,7 @@ import {
 import {
   Building2Icon,
   ChevronsUpDownIcon,
+  ClapperboardIcon,
   FileTextIcon,
   FileStackIcon,
   FileUpIcon,
@@ -56,6 +57,7 @@ import {
   DownloadIcon,
   UsersIcon,
   UsersRoundIcon,
+  WorkflowIcon,
 } from "lucide-react";
 
 // 注意：本 shadcn 版本基于 Base UI，组合一律用 `render`（不支持 asChild）。
@@ -112,6 +114,20 @@ function useNavItems(
           },
         ]
       : []),
+    // 系统展示：对全部登录用户可见，只读、不读业务数据。长标题在侧栏会被 truncate，
+    // 由 NavRow 的 title 属性与 tooltip 兜底（收折成图标栏时显示悬浮提示）。
+    {
+      title: "软件架构与人员层级管理结构流程图",
+      url: "/showcase/architecture",
+      icon: WorkflowIcon,
+      tooltip: "软件架构与人员层级管理结构流程图",
+    },
+    {
+      title: "软件架构及人员管理动画",
+      url: "/showcase/animation",
+      icon: ClapperboardIcon,
+      tooltip: "软件架构及人员管理动画",
+    },
     // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
     // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
     {
@@ -182,9 +198,11 @@ function NavRow({ item, pathname }) {
           )
         }
         isActive={active}
+        tooltip={item.tooltip}
+        title={item.title}
       >
         <Icon className="shrink-0" />
-        <span>{item.title}</span>
+        <span title={item.title}>{item.title}</span>
       </SidebarMenuButton>
       {/* 角标是绝对定位的，必须是按钮的兄弟节点（peer-* 样式靠这个关系生效） */}
       {item.badge > 0 && <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>}

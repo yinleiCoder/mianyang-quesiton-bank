@@ -1,14 +1,22 @@
 // 客户端下载页（公开页，不需要登录）。
 //
-// 线路分工（2026-10-21 用户拍板改回 gh-proxy）：
-//   · 版本清单 latest.json 与 Windows 安装包/zip 走自家阿里云 OSS（快、可控）；
-//   · **APK 走 gh-proxy 加速**：阿里云禁止 .apk 从 OSS 默认域名（*.aliyuncs.com）
-//     对外分发，而绑定自定义域名要求大陆备案，短期走不通。gh-proxy 是可配置的
-//     第三方加速前缀，页面上的 SHA-256 仍来自 OSS 清单，供用户自证文件。
+// 线路分工（2026-10-27 起，全部走自家阿里云 OSS）：
+//   · 版本清单 latest.json 与 Windows 安装包/zip 用 OSS 直链；
+//   · **APK 走本站的 /api/client/download 路由**：阿里云默认域名（*.aliyuncs.com）
+//     禁止分发 .apk（key 后缀、APK content-type、Content-Disposition 文件名三条都挡，
+//     签名地址也一样），而绑定自定义域名要求大陆备案。发布时 APK 已在桶里另存一份
+//     .bin 副本，这条路由把字节取回来、在本站域名下补上正确的文件名与类型
+//     （细节见 route.js 的文件头）。
 //
 // 本页与客户端检查更新读同一份 OSS `client/latest.json`，版本号（tag）同源；
 // APK 的实际下载地址由 `release.tag` + 固定资产名拼出，不会出现"页面 v2.8.1、
 // 下到 v2.8.0"的漂移。
+import {
+  APK_ALIAS_ASSETS,
+  APK_ASSET,
+  WIN_SETUP_ASSET,
+  WIN_ZIP_ASSET,
+} from "@/lib/client-assets.mjs"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -36,40 +44,29 @@ export const metadata = {
     "职教高考联盟的 Android 与 Windows 客户端：与网页端共用同一套题库和账号，随手刷题、背题、看学情。",
 }
 
-// 资产名固定（不带版本号），所以把名字换成别的会导致 404。
-// Asset 名与客户端仓库流水线里的**逐字一致**（那边特意不带版本号）。
+// 资产名固定（不带版本号），所以把名字换成别的会导致 404。清单见 lib/client-assets.mjs
+//（与客户端仓库 `tool/upload_to_oss.mjs` 逐字一致）。
 // Windows 默认给**安装包**：双击装完，自动建桌面快捷方式，不需要管理员权限，
 // 也不用管 C 运行库（随包带着）。zip 留给需要绿色版的人，是次要入口。
-const APK_ASSET = "mianyang_quiz-android.apk"
-const WIN_SETUP_ASSET = "mianyang_quiz-windows-x64-setup.exe"
-const WIN_ZIP_ASSET = "mianyang_quiz-windows-x64.zip"
-
-// gh-proxy 加速前缀：换节点只改环境变量 NEXT_PUBLIC_GH_PROXY（末尾带 /）。
-// 默认用实测可用的 gh-proxy.com；ghproxy.net 在 2026-10-21 的测试里明显更慢。
-const GH_PROXY =
-  (process.env.NEXT_PUBLIC_GH_PROXY || "https://gh-proxy.com/").replace(/\/+$/, "") + "/"
-const REPO = "yinleiCoder/mianyang-quiz"
-
-/** GitHub Release 资产地址（经 gh-proxy 加速）。优先钉到清单里的 tag，避免 latest 漂移。 */
-function githubAssetUrl(name, release) {
-  const path = release?.tag
-    ? `releases/download/${encodeURIComponent(release.tag)}/${name}`
-    : `releases/latest/download/${name}`
-  return `${GH_PROXY}https://github.com/${REPO}/${path}`
-}
 
 // 清单固定放在 OSS 默认域名上（JSON 不受 .apk 限制，也不依赖自定义域名是否已绑好）。
 // 资产直链来自清单里的 url；只有旧清单没有 url 时才用这个前缀兜底。
 const OSS_HOST = process.env.NEXT_PUBLIC_OSS_PUBLIC_HOST
 const OSS_BASE = OSS_HOST ? `https://${OSS_HOST}/client` : null
 
-/** 某个资产的下载地址：清单里的 OSS 直链优先；APK 固定走 gh-proxy。 */
+/** 本站的 APK 下载路由。按资产名直接取对象，不依赖清单——清单挂了也能下。 */
+function apkRouteUrl(name, release) {
+  const v = release?.tag ? `&v=${encodeURIComponent(release.tag)}` : ""
+  return `/api/client/download?name=${encodeURIComponent(name)}${v}`
+}
+
+/** 某个资产的下载地址：清单里的 url 优先；APK 兜底走本站路由，其余资产拼 OSS 直链。 */
 function assetUrl(name, release) {
   const direct = release?.assets?.get(name)?.url
   if (direct) return direct
   // APK 在 OSS 默认域名上会被阿里云 400 拦掉（绑定自定义域名要备案，短期不可行）
-  if (name.toLowerCase().endsWith(".apk")) return githubAssetUrl(name, release)
-  if (!OSS_BASE) return githubAssetUrl(name, release)
+  if (APK_ALIAS_ASSETS.includes(name)) return apkRouteUrl(name, release)
+  if (!OSS_BASE) return null
   const v = release?.tag ? `?v=${encodeURIComponent(release.tag)}` : ""
   return `${OSS_BASE}/${name}${v}`
 }
@@ -213,7 +210,7 @@ export default async function DownloadPage() {
               )}
               <p className="text-xs text-muted-foreground">
                 {apkUrl
-                  ? "经 gh-proxy 加速下载；首次安装需在系统设置里允许「安装未知来源应用」。"
+                  ? "文件由本站从阿里云 OSS 分发；首次安装需在系统设置里允许「安装未知来源应用」。"
                   : "下载地址生成失败，请稍后再试。"}
               </p>
             </CardContent>

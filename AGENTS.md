@@ -129,47 +129,64 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   文件名口径（洗非法字符 + 用 objectKey 的扩展名补后缀）在 `lib/materials.js` 的 `materialFileName`，
   与 Flutter 端 `material_brief.dart` 的 `suggestedFileName` 逐条一致，改一处要改另一处。
 
-## 客户端下载：Windows 走 OSS，APK 走 gh-proxy（2026-10-21 起）
+## 客户端下载：APK 走本站下载路由，其余直连 OSS（2026-10-27 起）
 
-GitHub release 资产国内直连不可用；自家成都 OSS 快。分工：
+GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy 已停用**
+（2026-10-27 用户拍板：太慢），网页端 `NEXT_PUBLIC_GH_PROXY` 与客户端 `Env.ghProxy`
+都已删除。
 
-- `client/latest.json` 与 Windows `setup.exe` / `zip` 走阿里云 OSS；
-- **APK 走 gh-proxy 加速**（`NEXT_PUBLIC_GH_PROXY` / Flutter `Env.ghProxy`，
-  默认 `https://gh-proxy.com/`）。原因是阿里云不允许 `.apk` 从默认域名
-  （`*.aliyuncs.com`）分发，而绑定自定义域名要求大陆 ICP 备案；`myquiz.cn`
-  目前查不到有效备案，这条路短期走不通。
+### 阿里云发不了 .apk（三条判据，2026-10-27 逐条实测）
 
-### .apk 的线路约定
+阿里云默认域名（`*.aliyuncs.com`）回 400 `ApkDownloadForbidden`，下面三条命中任意一条
+就挡，**带签名的地址也一样挡**：
 
-- 页面/客户端从 OSS 清单拿 `tag` 与 SHA-256，再用 **tag + 固定资产名**拼：
-  `${GH_PROXY}https://github.com/yinleiCoder/mianyang-quiz/releases/download/<tag>/<name>`。
-  **不要用 `latest/download`**：清单已经告诉用户是哪个版本，用 latest 会出现
-  "页面显示 v2.8.1、下到 v2.8.0" 的漂移。
-- 清单里 APK 的 `url` 通常为 `null`；若将来给桶绑了自定义域名并设置
-  `CLIENT_OSS_PUBLIC_BASE`，清单里的 OSS `url` 会优先，APK 自动改走 OSS。
-- 换 gh-proxy 节点只改环境变量/`Env.ghProxy`，不要把代理地址散落在组件里。
+1. 对象 key 以 `.apk` 结尾；
+2. 响应的 `Content-Type` 是 `application/vnd.android.package-archive`；
+3. `Content-Disposition` 里的文件名以 `.apk` 结尾。
+
+绑定自定义域名要求大陆 ICP 备案（`myquiz.cn` 没有有效备案），短期走不通。
+
+### 解法：`.bin` 副本 + 本站下载路由
+
+- 发布脚本把每个 APK **另存一份** `client/dist/<资产名>.bin`（`application/octet-stream`、
+  不带 `Content-Disposition`，三条都不命中）。口径在客户端仓库
+  `tool/upload_to_oss.mjs` 的 `ALIAS_PREFIX`，网页端镜像在 `lib/client-assets.mjs` 的
+  `clientApkAliasKey`——改一处必须改另一处。
+- 清单里 APK 的 `url` 指向
+  `https://myquiz.cn/api/client/download?name=<资产名>&v=<tag>`；Windows 资产仍是 OSS 直链。
+- `app/api/client/download/route.js` 从 OSS 取回字节，在**本站域名**下补上正确的
+  `Content-Type` 与文件名（流式转发、透传 Range、按 `?v=` 允许 CDN 缓存一天）。
+  它**只放行 `lib/client-assets.mjs` 里那三个资产名**——公开路由不做白名单，
+  等于给整只桶开了一个免费出口。
+- **已安装的客户端不用重发版**：它们从清单里读 `url`，下一次检查更新就改走新线路。
+  所以过渡期只要把线上那份 `latest.json` 改掉即可（见下）。
+- 网页端下载页在清单取不到时也能下 APK：`assetUrl` 对 APK 直接兜底到本站路由。
 
 ### 资产名、版本号与上线顺序
 
-- **资产名两端逐字一致**（都不带版本号）：网页端 `app/download/page.jsx` 的
+- **资产名两端逐字一致**（都不带版本号）：网页端 `lib/client-assets.mjs` 的
   `APK_ASSET` / `WIN_SETUP_ASSET` / `WIN_ZIP_ASSET`，与客户端仓库
   `mianyang_quiz/tool/upload_to_oss.mjs` 推上去的名字是同一套。改一处必须改另一处，
   否则页面点下去是 404。
 - **版本号三处同源**：客户端构建注入的 `APP_VERSION`、`client/latest.json` 的 `tag`、
   网页端下载页显示的版本徽标都来自同一个 git tag。客户端个人资料页会显示
   「当前版本 vX.Y.Z」，更新检查与网页端读同一份清单。
-- **上线顺序**：客户端打 tag → **GitHub Release**（gh-proxy 的上游必须先存在）→
-  `release.yml` 的「上传到阿里云 OSS」把 `assets/*` 推到 `client/` 并写
-  `client/latest.json`（缺 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 直接失败，
+- **上线顺序**：客户端打 tag → GitHub Release（留档）→
+  `release.yml` 的「上传到阿里云 OSS」把 `assets/*` 推到 `client/`（APK 另带 `.bin` 副本）
+  并写 `client/latest.json`（缺 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 直接失败，
   避免"GitHub 发了、下载页还停在旧版本"）→ 网页端 1 分钟内跟上（revalidate 60）→
   客户端启动时读同一份清单检查更新。
 - ⚠ `release` job 的第一步必须是 `actions/checkout@v4`：它要执行
   `tool/upload_to_oss.mjs`。只下载 artifact 的 job 里没有这个文件
   （2026-10-21 v2.8.3 因此报 `MODULE_NOT_FOUND`；旧流程缺 secrets 时会跳过，所以一直没暴露）。
 - `latest.json` 结构：`{ tag, publishedAt, assets: [{ name, size, sha256, url }] }`；
-  Windows 的 `url` 带 `?v=<tag>` 绕开 CDN 旧缓存。
-- 补历史版本：本机跑
-  `node tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z [--public-base https://<域名>/client]`，
-  脚本会校验上传后的长度（APK 在默认域名上跳过长度回读）并写 latest.json。
+  资产 `url` 都带 `?v=<tag>` 绕开 CDN 旧缓存。
+- **给已经发布的那一版补副本 / 改清单**：`node scripts/client-apk-alias.mjs`
+  （只加 `.bin` 副本，随时可跑）；网页端部署**之后**再加 `--manifest` 才会改线上清单——
+  脚本会先 HEAD 一次下载路由，没上线就拒绝，免得已装客户端拿到 404 的更新地址。
+  2026-10-27 就是用它把 v2.9.1 的三份 APK 接过来的。
+- 补历史版本（本机）：`node mianyang_quiz/tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z`
+  （`--site-base` 默认 `https://myquiz.cn`；`--public-base` 只影响 Windows 前缀），
+  脚本会校验 `.bin` 副本的长度并写 latest.json。
 - 2026-10-21 曾尝试把 `download.myquiz.cn` 绑到大陆 bucket，因备案问题未成功；
   Cloudflare 上还留着 TXT `_dnsauth.download` 与 CNAME `download`，不再使用时可以删掉。
