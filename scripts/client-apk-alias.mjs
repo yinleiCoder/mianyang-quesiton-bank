@@ -1,14 +1,14 @@
-// 给**已经发布的**那一版补 APK 的 `.bin` 副本，并可把清单里 APK 的 url 指向本站下载路由。
+// 给**已经发布的**那一版补 APK 的 `.bin` 副本，并可把清单里 APK 的 url 指向自动下载页。
 //
 // 为什么需要它：2026-10-27 之前发布的版本只把 APK 传成了 `<资产名>.apk`，而阿里云默认域名
-// 禁止分发 .apk（三条判据见 app/api/client/download/route.js 的文件头）。下载路由取的是
+// 禁止分发 .apk（三条判据见 components/download/apk-download.jsx 的文件头）。浏览器直连的是
 // `client/dist/<资产名>.bin`。新版本由 `tool/upload_to_oss.mjs` 自动补副本，这个脚本只处理
 // 线上已经存在的那一版，以及"网页端还没部署就抢先改清单"的事故恢复。
 //
 //   node scripts/client-apk-alias.mjs             # 只补 .bin 副本（随时可跑，不影响线上）
 //   node scripts/client-apk-alias.mjs --manifest  # 再改清单（**网页端部署之后**才能跑）
 //
-// `--manifest` 之前会先 HEAD 一次本站下载路由：路由还没上线就拒绝——否则已安装的客户端
+// `--manifest` 之前会先探测一次自动下载页：页面还没上线就拒绝——否则已安装的客户端
 // 会从清单里拿到一个 404 的更新地址，比继续走旧线路更糟。
 //
 // 密钥从 .env.local 读（与 scripts/oss-cors.mjs、服务端路由同一份），不落盘、不外传。
@@ -53,7 +53,7 @@ async function headLength(key) {
   return res.ok ? Number(res.headers.get("content-length") ?? -1) : null
 }
 
-/** 服务端整对象复制，并把元数据换成"下载路由能取"的那一套（REPLACE 会清掉旧的头）。 */
+/** 服务端整对象复制，并把元数据换成"浏览器能直连下载"的那一套（REPLACE 会清掉旧的头）。 */
 async function copyObject(srcKey, destKey) {
   const date = new Date().toUTCString()
   const source = `/${bucket}/${srcKey}`
@@ -126,14 +126,14 @@ if (!wantsManifest) {
   process.exit(0)
 }
 
-// 先确认路由真的上线了：没上线就改清单，已安装客户端点「去下载」会拿到 404，
+// 先确认自动下载页真的上线了：没上线就改清单，已安装客户端点「去下载」会拿到 404，
 // 比继续走旧线路更糟。
 const probeName = apkAssets[0].name
-const probeUrl = `${siteBase}/api/client/download?name=${encodeURIComponent(probeName)}`
+const probeUrl = `${siteBase}/download/apk?name=${encodeURIComponent(probeName)}`
 const probe = await fetch(probeUrl, { method: "HEAD" })
 if (!probe.ok) {
   console.error(
-    `下载路由还没就绪（HEAD ${probeUrl} → ${probe.status}）。先部署网页端，再跑 --manifest；` +
+    `自动下载页还没就绪（HEAD ${probeUrl} → ${probe.status}）。先部署网页端，再跑 --manifest；` +
       "只补副本的话不加这个参数。"
   )
   process.exit(1)
@@ -141,7 +141,7 @@ if (!probe.ok) {
 
 let changed = 0
 for (const asset of apkAssets) {
-  const url = `${siteBase}/api/client/download?name=${encodeURIComponent(asset.name)}&v=${encodeURIComponent(manifest.tag)}`
+  const url = `${siteBase}/download/apk?name=${encodeURIComponent(asset.name)}&v=${encodeURIComponent(manifest.tag)}`
   if (asset.url !== url) {
     asset.url = url
     changed++
@@ -151,5 +151,5 @@ if (changed === 0) {
   console.log("\n清单里的 APK url 已是最新，无需重写。")
 } else {
   await putJson("client/latest.json", manifest)
-  console.log(`\n清单已更新：${changed} 个 APK 的 url 指向本站下载路由（${siteBase}）。`)
+  console.log(`\n清单已更新：${changed} 个 APK 的 url 指向自动下载页（${siteBase}）。`)
 }

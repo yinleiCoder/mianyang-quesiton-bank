@@ -129,11 +129,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   文件名口径（洗非法字符 + 用 objectKey 的扩展名补后缀）在 `lib/materials.js` 的 `materialFileName`，
   与 Flutter 端 `material_brief.dart` 的 `suggestedFileName` 逐条一致，改一处要改另一处。
 
-## 客户端下载：APK 走本站下载路由，其余直连 OSS（2026-10-27 起）
+## 客户端下载：双端都由浏览器直连 OSS（2026-10-29 起）
 
 GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy 已停用**
 （2026-10-27 用户拍板：太慢），网页端 `NEXT_PUBLIC_GH_PROXY` 与客户端 `Env.ghProxy`
-都已删除。
+都已删除。APK 与 Windows 唯一的区别是：阿里云不让 `.apk` 这种"长相"从默认域名出去，
+所以 APK 在桶里存 `.bin` 副本，由**浏览器**取回后改名存盘。
 
 ### 阿里云发不了 .apk（三条判据，2026-10-27 逐条实测）
 
@@ -145,22 +146,36 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 3. `Content-Disposition` 里的文件名以 `.apk` 结尾。
 
 绑定自定义域名要求大陆 ICP 备案（`myquiz.cn` 没有有效备案），短期走不通。
+浏览器这边也别指望擦边写法：`filename="…apk."` 在 Chrome 里会存成 `…apk_`（实测）。
 
-### 解法：`.bin` 副本 + 本站下载路由
+### 服务端补文件名也走不通（2026-10-29 实测）
+
+`/api/client/download` 那条转发路由上线后**对任何人都是 502**：Vercel 香港函数（hkg1）
+连不上成都 OSS —— 连接稳定地在 ~10 秒后超时（undici 的 connect timeout），而同一个
+部署的**构建环境**却能取到清单。更隐蔽的是 `/download` 的服务端 ISR 重新生成也会失败，
+版本号与 SHA 列表会静默消失。`preferredRegion` 在 Next 16 已废弃（Vercel 只认
+`auto|global|home`），换不了区域。**别再写服务端转发 OSS 的下载路由。**
+
+### 解法：`.bin` 副本 + 浏览器改名
 
 - 发布脚本把每个 APK **另存一份** `client/dist/<资产名>.bin`（`application/octet-stream`、
   不带 `Content-Disposition`，三条都不命中）。口径在客户端仓库
   `tool/upload_to_oss.mjs` 的 `ALIAS_PREFIX`，网页端镜像在 `lib/client-assets.mjs` 的
   `clientApkAliasKey`——改一处必须改另一处。
-- 清单里 APK 的 `url` 指向
-  `https://myquiz.cn/api/client/download?name=<资产名>&v=<tag>`；Windows 资产仍是 OSS 直链。
-- `app/api/client/download/route.js` 从 OSS 取回字节，在**本站域名**下补上正确的
-  `Content-Type` 与文件名（流式转发、透传 Range、按 `?v=` 允许 CDN 缓存一天）。
-  它**只放行 `lib/client-assets.mjs` 里那三个资产名**——公开路由不做白名单，
-  等于给整只桶开了一个免费出口。
-- **已安装的客户端不用重发版**：它们从清单里读 `url`，下一次检查更新就改走新线路。
-  所以过渡期只要把线上那份 `latest.json` 改掉即可（见下）。
-- 网页端下载页在清单取不到时也能下 APK：`assetUrl` 对 APK 直接兜底到本站路由。
+- **下载在浏览器里完成**：`components/download/apk-download.jsx` 用 `fetch` 直连 OSS
+  （桶的 CORS 必须放行本站的 GET，见 `scripts/oss-cors.mjs`），读成 Blob 后
+  `<a download="<资产名>">` 存盘。文件名只能这样给——跨源链接的 `download` 属性、
+  302 跳转过去都会被浏览器忽略（实测）。
+- 代价：整包在内存里过一遍（约 32MB）。换来的是国内用户直连成都 OSS 的速度，
+  以及完全不依赖中间服务器；失败时给 `.bin` 直链兜底。
+- 清单里 APK 的 `url` 指向 `https://myquiz.cn/download/apk?name=<资产名>&v=<tag>`：
+  这是**自动下载落地页**（加载即触发上面的流程），给已安装客户端的「去下载」用。
+  **旧客户端不用重发版**，清单改掉就生效。Windows 资产仍是 OSS 直链。
+- `/api/client/download` 留作**过渡期 302**：v2.9.2 的清单还指着它，部署后老客户端
+  会被送到落地页（302 不碰 OSS，所以在连不上 OSS 的函数里也能用）。清单回填后
+  只剩收藏的旧链接会来。
+- `/download` 页整体挪到客户端组件（`components/download/download-page-client.jsx`）：
+  清单也由浏览器取，避开上面那个"服务端读 OSS 会失败"的坑；页面因此是纯静态。
 
 ### 资产名、版本号与上线顺序
 
@@ -183,8 +198,8 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
   资产 `url` 都带 `?v=<tag>` 绕开 CDN 旧缓存。
 - **给已经发布的那一版补副本 / 改清单**：`node scripts/client-apk-alias.mjs`
   （只加 `.bin` 副本，随时可跑）；网页端部署**之后**再加 `--manifest` 才会改线上清单——
-  脚本会先 HEAD 一次下载路由，没上线就拒绝，免得已装客户端拿到 404 的更新地址。
-  2026-10-27 就是用它把 v2.9.1 的三份 APK 接过来的。
+  脚本会先探测 `/download/apk`，没上线就拒绝，免得已装客户端拿到 404 的更新地址。
+  2026-10-27 用它接过 v2.9.1；2026-10-29 用它把清单从失效的服务端路由切到落地页。
 - 补历史版本（本机）：`node mianyang_quiz/tool/upload_to_oss.mjs --dir <目录> --tag vX.Y.Z`
   （`--site-base` 默认 `https://myquiz.cn`；`--public-base` 只影响 Windows 前缀），
   脚本会校验 `.bin` 副本的长度并写 latest.json。
