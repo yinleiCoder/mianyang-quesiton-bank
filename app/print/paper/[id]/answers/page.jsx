@@ -22,11 +22,18 @@ export default async function PrintPaperAnswersPage({ params }) {
   } catch {
     snapshot = null
   }
-  if (!snapshot) {
+  // 答案可见性由服务端判定（0116）：教师/管理员/作者/本版审批人之外，
+  // get_paper_version 返回的是已剥答案的快照，并带 answers_visible=false。
+  // 这里再挡一次是纵深防御——页面上不应出现"看起来像答案页、其实没答案"的状态。
+  if (!snapshot || snapshot.answers_visible === false) {
     return (
       <AccessDenied
-        title="试卷不可见"
-        description="这份试卷可能正在审核中、已被撤回，或不属于你，因此不能打印。"
+        title={snapshot ? "没有查看答案的权限" : "试卷不可见"}
+        description={
+          snapshot
+            ? "参考答案只对教师、试卷作者与审批人开放。你可以返回打印正卷（不含答案）。"
+            : "这份试卷可能正在审核中、已被撤回，或不属于你，因此不能打印。"
+        }
       />
     )
   }

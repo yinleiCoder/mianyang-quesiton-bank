@@ -1,0 +1,46 @@
+# 网页端的质量门禁：每次 push / PR 都先跑测试与生产构建。
+#
+# 为什么要有这一条：此前 package.json 里只有手动 `npm run test:*`，仓库没有
+# 任何 CI——坏构建可以直接部署到 Vercel，线上错误只能靠用户反馈。
+#
+# 公开变量（publishable key / OSS 公网 host）不是机密：它们本来就印在浏览器包里。
+# 真正的密钥（OSS AccessKey、AI key）只在服务端环境变量里，CI 不配也不构建失败。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 关键测试
+        run: |
+          npm run test:import
+          npm run test:docx
+          npm run test:pdf
+          npm run test:retry
+          npm run test:ai-report
+          npm run test:phone
+
+      - name: 生产构建
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://api.myquiz.cn
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_sKDyEQXOuKnG0pcNcJBTNg_OFB1PAM7
+          NEXT_PUBLIC_OSS_PUBLIC_HOST: mianyang-question-bank.oss-cn-chengdu.aliyuncs.com

@@ -4,6 +4,7 @@
 // 而不是框架默认的 500。按 Next 16 约定，错误边界必须是客户端组件，重试函数叫 retry。
 // 注：error.jsx 不包住同段的 layout，app/(app)/layout.jsx 自身的错误会继续上抛（见 app/global-error.jsx）。
 import { useEffect } from "react"
+import * as Sentry from "@sentry/nextjs"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,8 +12,10 @@ import { TriangleAlertIcon } from "lucide-react"
 
 export default function AppError({ error, retry }) {
   useEffect(() => {
-    // 生产环境下 error.message 是通用文案，靠 digest 与服务端日志对照
+    // 生产环境下 error.message 是通用文案，靠 digest 与服务端日志对照。
+    // 未配置 DSN 时 captureException 是 no-op，不影响页面。
     console.error("页面渲染失败", error)
+    Sentry.captureException(error)
   }, [error])
 
   return (

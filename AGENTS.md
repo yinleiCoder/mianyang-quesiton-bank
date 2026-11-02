@@ -177,6 +177,48 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 - `/download` 页整体挪到客户端组件（`components/download/download-page-client.jsx`）：
   清单也由浏览器取，避开上面那个"服务端读 OSS 会失败"的坑；页面因此是纯静态。
 
+### Android 安装包发哪个 ABI（2026-11-02 定案）
+
+**下载页默认下发 `mianyang_quiz-android.apk`（arm64-v8a），并提供一条显眼的
+「32 位版」链接指向 `mianyang_quiz-android-armv7.apk`（armeabi-v7a）。**
+
+两边的可装性是**不对称**的，这决定了怎么选：
+
+| 设备 | armv7 包 | arm64 包 |
+|---|---|---|
+| 32 位 ARM 真机（老手机、千元机） | ✅ | ❌「应用未安装」 |
+| 64 位 ARM 真机 | ✅ | ✅ |
+| 64 位-only 系统（Pixel 7 起那批） | ❌ | ✅ |
+| x86_64 模拟器 | ❌ | ❌ |
+
+**为什么默认给 arm64**：armv7 的覆盖面更大（32 位 + 64 位真机通吃），但**用户反馈里
+没有"装不上"这一类**——唯一的硬信号（闪退）全在 Windows，与 ABI 无关。没有证据说
+32 位用户成规模，就先给**性能更好**的那份，32 位由页面上的备用链接兜底。
+
+**代价要说清楚**：32 位手机点主按钮会装不上，而报错只有一句「应用未安装」，
+不告诉任何人该换哪个文件——所以那条「32 位版」链接必须显眼，不能藏进脚注。
+
+**更新永远不会跨 ABI**：客户端的更新检查按**自己实际在跑的 ABI** 选包
+（`mianyang_quiz/lib/utils/android_abi.dart`，从 `/proc/self/maps` 读出来），
+所以网页端默认发哪份，都不影响"装的是 A、更新推的是 A"。
+
+**资产名必须逐字一致**（`release.yml` 的「规整资产名」里定的）：
+
+| 资产名 | ABI | 给谁 |
+|---|---|---|
+| `mianyang_quiz-android.apk` | arm64-v8a | **默认下发**：64 位真机 |
+| `mianyang_quiz-android-armv7.apk` | armeabi-v7a | 32 位老设备（页面上的「32 位版」链接） |
+| `mianyang_quiz-android-x86_64.apk` | x86_64 | 模拟器 |
+
+**三处必须同时改**（改一处就是"装的是 A、更新推的是 B"）：
+
+1. 网页端 `lib/client-assets.mjs` 的 `APK_ASSET`（下载页按钮 + 落地页默认值）；
+2. 客户端 `mianyang_quiz/lib/utils/android_abi.dart` 的 `assetByAbi`（ABI → 资产名）；
+3. `mianyang_quiz/.github/workflows/release.yml` 的资产名映射注释与 Release 说明。
+
+`APK_ALIAS_ASSETS` 三个名字**都要留着**：它是 `/download/apk` 落地页 `?name=` 的
+白名单，而线上清单对三个名字都发过链接，漏一个，收藏的旧链接就变 404。
+
 ### 资产名、版本号与上线顺序
 
 - **资产名两端逐字一致**（都不带版本号）：网页端 `lib/client-assets.mjs` 的
@@ -205,3 +247,32 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
   脚本会校验 `.bin` 副本的长度并写 latest.json。
 - 2026-10-21 曾尝试把 `download.myquiz.cn` 绑到大陆 bucket，因备案问题未成功；
   Cloudflare 上还留着 TXT `_dnsauth.download` 与 CNAME `download`，不再使用时可以删掉。
+
+## 试卷改版后的成绩：旧交卷按新版答案重算（0115，2026-10-29）
+
+用户报「24年单招发布第三版后，之前的考试成绩不在了」。核实：v2 有 **119 场官方已出分**，
+v3 是 0 场 —— 成绩没丢，是 0077/0078 只认 `current_published_version_id`。
+
+产品口径（用户原话）：**"改一版都是小范围题目的改，所以成绩请按照改版后的答案重新计算分数
+排名即可"** —— 不分成两张榜，而是把旧交卷**迁到新版**、用**新版答案**重算。
+
+- 入口只有一个：`papers.current_published_version_id` 上的 **AFTER UPDATE 触发器**
+  → `rescore_attempts_for_version(paper_id, new_version_id)`。用触发器而不是在
+  `review_decide_paper` 里加一行：那是 100 行审批逻辑，重抄只为加一行调用不划算，
+  抄错一个分支就是审批故障。它能成立的前提是**所有读路径都只看当前入库版本**
+  （0077/0078/0087/0088 本来就是这样），所以那些函数一行都没改。
+- 映射**按 question_id，不按 seq**：同一道题改内容是同一道题；整道题被换掉时旧答案
+  不会被错安到新题上。线上核过没有任何一份卷面里同一道题出现两次。
+- **题没改就原样搬**（同 question_version_id + 同 score + 同 score_units）：人工判分的
+  `manual_score/comment/scored_by` 一起搬，不让教师白判一遍；只有改过的题才用
+  `grade_exam_units(新版 content)` 重判（人工题回到 pending）。别在这里另写一套判分逻辑。
+- **官方成绩去重保留"最新版本"那一条**，不是最早一次：合并前他看到的就是最新版的成绩
+  （线上 唐涛 v1 待阅卷 0 分 + v2 已出分 6 分，保留最早会让他从榜上消失）。其余降为自主练习，
+  否则搬进同一版会撞 `uq_exam_official`。
+- **进行中的考试一律 `abandoned`**：卷面已经不是他打开时那一份了。
+- 幂等：已经在目标版本上的场次不会被再处理；补跑用
+  `select public.rescore_attempts_for_version(...)`。
+- 迁移里带**回填**：把线上已经落在旧版本上的成绩按同一口径迁过来
+  （2026-10-29 只有「24年单招」命中：v2 的 130 场 → v3，榜仍是 119 人、平均 96.73、最高 158）。
+- 0115 草稿期试过"一版一张榜 + 版本切换器"（`resolve_paper_version` + `p_version_id`），
+  **已废弃并删除**：既然要重算，就没有第二张榜可看，别再往那个方向改。

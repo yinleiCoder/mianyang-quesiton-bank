@@ -61,7 +61,13 @@ async function AppSidebarData() {
   let openFeedback = 0
   let openReviews = 0
   if (profile?.school_id) {
-    schoolName = schoolNameOf(await loadSchools(), profile.school_id)
+    try {
+      schoolName = schoolNameOf(await loadSchools(), profile.school_id)
+    } catch {
+      // 学校名是装饰性的：参考数据抖动不该让整个受保护区进 500。
+      // 名字缺失时侧栏照常渲染，只是不显示学校。
+      schoolName = null
+    }
   }
   // 两个角标（反馈收件箱 / 我的待办）是装饰性的：查询失败不该让所有页面跟着进错误边界，退回 0 即可
   const needsCounts = ctx.isAdmin || ctx.isApprover || ctx.isSchoolAdmin

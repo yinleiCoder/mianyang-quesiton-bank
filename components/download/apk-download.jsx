@@ -29,6 +29,7 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
   const busy = useRef(false)
   const autoStarted = useRef(false)
   const lastPct = useRef(-1)
+  const abortRef = useRef(null)
 
   const aliasUrl = OSS_HOST
     ? `https://${OSS_HOST}/${clientApkAliasKey(name)}${version ? `?v=${encodeURIComponent(version)}` : ""}`
@@ -44,8 +45,15 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
     lastPct.current = -1
     setState("downloading")
     setProgress(0)
+    // 整包要在内存里过一遍（约 32MB，峰值约 2 倍）。低端机/AI 断主要靠这里
+    // 能取消：abort 后 reader 立即结束，不再继续堆 chunks。
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
-      const res = await fetch(aliasUrl, { cache: "no-store" })
+      const res = await fetch(aliasUrl, {
+        cache: "no-store",
+        signal: controller.signal,
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       if (!res.body) throw new Error("浏览器不支持流式读取")
       const total = Number(res.headers.get("content-length")) || 0
@@ -70,12 +78,26 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
       setProgress(100)
       setState("done")
     } catch (err) {
+      // 用户主动取消不是失败：回到 idle，让他可以重新点下载。
+      if (err?.name === "AbortError") {
+        setState("idle")
+        setProgress(0)
+        return
+      }
       console.error("[apk-download] 下载失败", err)
       setState("error")
     } finally {
       busy.current = false
+      if (abortRef.current === controller) abortRef.current = null
     }
   }, [aliasUrl, name])
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
+  // 组件卸载（换页/关落地页）时也要停掉流，别让它在后台继续占内存。
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   // 自动下载：客户端更新流程打开的 /download/apk 落地页用。
   // ref 守卫是给开发环境 React StrictMode 的双调用准备的——别下两遍。
@@ -108,6 +130,12 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
         )}
         {label}
       </Button>
+
+      {state === "downloading" && (
+        <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={cancel}>
+          取消下载
+        </Button>
+      )}
 
       {state === "done" && (
         <p className="mt-2 text-xs text-muted-foreground">

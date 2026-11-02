@@ -3,7 +3,7 @@
 // 用途与上限见 lib/media-spec.js（唯一真源，前端上传器共用同一张表）：
 //   · question_media → qbank/…（上传后由客户端调 register_media 登记，随草稿保存挂版本引用，GC 管清理）
 //   · avatar        → avatars/…（仅写入 profiles.avatar_url，不登记 media_objects，避免被 GC 误删仍被引用的头像）
-// 同一客户端签名复用 OSS 官方 policy 约束：content-length-range / starts-with key / Content-Type 精确匹配。
+// 同一客户端签名复用 OSS 官方 policy 约束：content-length-range / 精确 key / Content-Type 精确匹配。
 // 鉴权两种来源：网页端 SSR cookie；Flutter 客户端用 Authorization: Bearer <supabase access_token>（无需 cookie）。
 import { createHmac, randomUUID } from "crypto"
 import { getRequestAuth } from "@/lib/api-auth"
@@ -27,7 +27,7 @@ export async function POST(request) {
 }
 
 async function signUpload(request) {
-  const { user } = await getRequestAuth(request)
+  const { user, supabase } = await getRequestAuth(request)
   if (!user) {
     return Response.json({ error: "未登录或会话已过期" }, { status: 401 })
   }
@@ -42,6 +42,20 @@ async function signUpload(request) {
   const spec = PURPOSES[purpose]
   if (!spec) {
     return Response.json({ error: "未知的用途类型" }, { status: 400 })
+  }
+
+  // 资料区只对教师/管理员开放（与 /materials 页面同一口径）。question_media
+  // 仍允许学生上传——反馈附件要用；avatar 本人即可。
+  if (purpose === "material") {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("identity, is_admin")
+      .eq("user_id", user.id)
+      .maybeSingle()
+    const allowed = !error && (profile?.is_admin || profile?.identity === "teacher")
+    if (!allowed) {
+      return Response.json({ error: "只有教师可以上传复习资料" }, { status: 403 })
+    }
   }
   const mime = String(contentType ?? "").toLowerCase()
   const type = typeFor(purpose, mime)
@@ -73,7 +87,9 @@ async function signUpload(request) {
       conditions: [
         ["content-length-range", 0, tier.maxBytes],
         { bucket },
-        ["starts-with", "$key", spec.keyPrefix],
+        // 精确绑定服务端生成的对象 key：policy 只允许写这一个对象，
+        // 不能换成同前缀下的别的 key（否则可覆盖已知媒体对象）。
+        ["eq", "$key", key],
         ["eq", "$success_action_status", "200"],
         ["eq", "$Content-Type", mime],
       ],

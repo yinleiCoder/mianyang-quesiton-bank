@@ -7,6 +7,10 @@
 // **已安装的旧客户端也会来这里**：清单里 APK 的 url 就指向本页（`?name=` 指明 ABI，
 // `?v=` 只用于缓存键与展示），它们用系统浏览器打开，效果与新版一致。因此这一页
 // 不能依赖登录、客户端版本或任何服务端数据。
+//
+// **`?name=` 不认识时给默认那个（arm64-v8a）**：64 位真机与模拟器之外的常规设备。
+// 32 位老设备走页面上的「32 位版」链接（`?name=mianyang_quiz-android-armv7.apk`）。
+// 见 lib/client-assets.mjs 里 APK_ASSET 那段——为什么默认给 arm64、代价是什么。
 import { APK_ALIAS_ASSETS, APK_ASSET } from "@/lib/client-assets.mjs"
 import { ApkDownload } from "@/components/download/apk-download"
 

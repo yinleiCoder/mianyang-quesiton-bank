@@ -16,6 +16,15 @@ import { docxBatches, segmentQuestions, looksLikeOptions, looksLikeStem } from "
 
 const FILE = path.resolve("docs/高三单招真题_修订后及答案.docx")
 
+// 真实卷夹具不入库（可能含学生信息/版权内容）。本地放了才跑；CI 缺它时
+// 显式跳过，而不是让整条流水线红在一个与代码无关的文件上。
+if (!fs.existsSync(FILE)) {
+  console.log(
+    `跳过：缺少 ${path.relative(process.cwd(), FILE)}（真实卷夹具，未入库；本地放了才跑）`,
+  )
+  process.exit(0)
+}
+
 let failed = 0
 function fail(msg) {
   console.error("✗ " + msg)

@@ -56,17 +56,11 @@ export default async function BankPage({ searchParams }) {
   // 科目筛选 = 所选节点及其全部后代（题库挂在学科/课程这类可挂节点上）
   const subtreeIds = node ? (nodeMap.has(node) ? subtreeIdsOf(nodes, node) : []) : null
 
-  // 标签筛选先解析出命中版本集合（多对多，postgREST 无法在过滤层直接 join）
-  let tagVersionIds = null
-  if (tag) {
-    const vtRes = await supabase
-      .from("version_tags")
-      .select("version_id")
-      .eq("tag_id", tag)
-    tagVersionIds = new Set((vtRes.data ?? []).map((v) => v.version_id))
-  }
-
-  const shortCircuit = (subtreeIds?.length === 0) || (tagVersionIds?.size === 0)
+  // 标签筛选走 PostgREST 的内嵌过滤（version_tags!inner + eq），不再先拉
+  // 「命中该标签的全部 version_id」再拼 .in(...)——热门标签会把 URL 撑爆（414/超时）。
+  // version_tags 的主键是 (version_id, tag_id)，过滤单个标签时每个版本至多一行，
+  // count 仍然准确。
+  const shortCircuit = subtreeIds?.length === 0
 
   let versionRows = []
   let count = 0
@@ -74,7 +68,7 @@ export default async function BankPage({ searchParams }) {
     let b = supabase
       .from("question_versions")
       .select(
-        "id, question_id, version_no, qtype, difficulty, content, published_at, created_by, question:questions!question_versions_question_id_fkey!inner(id, school_id, course_node_id, state)",
+        "id, question_id, version_no, qtype, difficulty, content, published_at, created_by, version_tags!inner(tag_id), question:questions!question_versions_question_id_fkey!inner(id, school_id, course_node_id, state)",
         { count: "exact" }
       )
       .eq("status", "published")
@@ -84,7 +78,7 @@ export default async function BankPage({ searchParams }) {
     if (diff) b = b.eq("difficulty", Number(diff))
     if (kw) b = b.ilike("search_text", `%${escapeLike(kw)}%`)
     if (subtreeIds) b = b.in("question.course_node_id", subtreeIds)
-    if (tagVersionIds) b = b.in("id", [...tagVersionIds])
+    if (tag) b = b.eq("version_tags.tag_id", tag)
     const res = await b.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
     if (res.error) throw res.error
     versionRows = res.data ?? []
