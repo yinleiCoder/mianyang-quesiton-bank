@@ -261,6 +261,22 @@ ok("计分点排布对不上时，fallback 也保留学生作答", () => {
   assert.equal(specs[0].blank, false)
 })
 
+ok("填空题计分点与空数对不上时，fallback 也带学生作答", () => {
+  const item = {
+    qtype: "fill_blank",
+    score_units: [2, 2],
+    content: {
+      stem: [{ t: "text", text: "甲 ___ 乙 ___ 丙 ___" }],
+      answer: { type: "blank", values: ["A", "B", "C"] },
+    },
+  }
+  const record = { answer: { type: "blank", values: ["A", "B", "C"] } }
+  const specs = buildUnitSpecs(item, record, ["一", "二"])
+  assert.equal(specs.length, 2)
+  assert.equal(specs[0].blank, false)
+  assert.ok(specs[0].student.includes("A"), specs[0].student)
+})
+
 ok("unit specs：binary 半分与空白非零被拒", () => {
   const specs = [
     { index: 0, mode: "binary", max: 2, blank: false },

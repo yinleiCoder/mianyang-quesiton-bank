@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/table"
 import { EmptyState } from "@/components/empty-state"
 import { TreePicker } from "@/components/admin/tree-picker"
-import { Loader2Icon, PlusIcon, UsersRoundIcon } from "lucide-react"
+import { Loader2Icon, PlusIcon, Trash2Icon, UsersRoundIcon } from "lucide-react"
 
 // 班级只能挂 专业大类(category) 或 专业(major)——与 0063 的 validate_class 同一口径
 const isMajorNode = (n) => n.scope === "vocational" && (n.kind === "category" || n.kind === "major")
@@ -56,6 +56,7 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [toggling, setToggling] = useState(null)
+  const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const schoolMap = useMemo(() => new Map((schools ?? []).map((s) => [s.id, s.name])), [schools])
@@ -84,6 +85,7 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
       setCreating(false)
       setEditing(null)
       setToggling(null)
+      setDeleting(null)
       // 注册页（选班级）与学生管理读的是服务端缓存里的班级名单，写完必须喊一声
       //（见 lib/actions/reference.js）。router.refresh() 只刷新本页，管不到那份缓存。
       refreshReferenceQuietly("classes")
@@ -192,6 +194,18 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
                         >
                           {c.is_active ? "停用" : "启用"}
                         </Button>
+                        {/* 删除：班里还有学生时服务端会拒绝（先转班/移出），
+                            这里不做前端预判 —— 提示语由 RPC 给，才说得出"还剩几个人" */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleting(c)}
+                          disabled={busy}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                          删除
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -275,6 +289,37 @@ export function ClassesManager({ classes, schools, nodes, caller }) {
               >
                 {busy && <Loader2Icon className="size-4 animate-spin" />}
                 确定
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {deleting && (
+        <AlertDialog open onOpenChange={(o) => !o && setDeleting(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>删除班级「{deleting.class_name}」？</AlertDialogTitle>
+              <AlertDialogDescription>
+                {Number(deleting.student_count) > 0
+                  ? `这个班还有 ${deleting.student_count} 名学生。请先在「学生名册」里把他们转到别的班或移出班级，再回来删除。`
+                  : "删除后不可恢复。班级名下的学生档案不会受影响（这个班没有学生）。"}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={busy || Number(deleting.student_count) > 0}
+                onClick={() =>
+                  run(
+                    (supabase) =>
+                      supabase.rpc("admin_delete_class", { p_class_id: deleting.class_id }),
+                    "班级已删除"
+                  )
+                }
+              >
+                {busy && <Loader2Icon className="size-4 animate-spin" />}
+                确认删除
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -33,7 +33,8 @@ const STATUS_TEXT = { submitted: "待阅卷", grading: "阅卷中", graded: "已
 // 而那正是最需要教师逐子题给分的一种题。
 function AnswerText({ item, answer }) {
   const a = answer ?? {}
-  if (a.type === "unknown") return <Missing />
+  // 学生主动点了「不会」（客户端提交 {"type":"unknown"}）—— 与漏答不是一回事
+  if (a.type === "unknown") return <span className="text-muted-foreground">（学生标记：不会）</span>
 
   if (item.qtype === "composite") {
     const subs = Array.isArray(a.subs) ? a.subs : []
@@ -55,7 +56,8 @@ function AnswerText({ item, answer }) {
 
 function AnswerBody({ qtype, answer }) {
   const a = answer ?? {}
-  if (a.type === "unknown") return <Missing />
+  // 学生主动点了「不会」（客户端提交 {"type":"unknown"}）—— 与漏答不是一回事
+  if (a.type === "unknown") return <span className="text-muted-foreground">（学生标记：不会）</span>
   if (qtype === "single_choice" || qtype === "multiple_choice")
     return <span className="font-medium">{(a.keys ?? []).join("、") || "（未作答）"}</span>
   if (qtype === "true_false")
@@ -232,7 +234,10 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
   const supabase = createClient()
   const [queue, setQueue] = useState(initialQueue)
   const [onlyPending, setOnlyPending] = useState(true)
-  const [onlyPendingRows, setOnlyPendingRows] = useState(true)
+  // 默认**显示已批过的题**（2026-11-05 用户要求）：批完就消失的话，发现判错时
+  // 那道题已经不在页面上，没法改分。现在批完仍留在原位、分数可编辑；
+  // 想只看没批的，勾「只看待判」。
+  const [onlyPendingRows, setOnlyPendingRows] = useState(false)
   const [current, setCurrent] = useState(null) // 阅卷详情 {attempt, paper, answers}
   const [loading, setLoading] = useState(false)
 

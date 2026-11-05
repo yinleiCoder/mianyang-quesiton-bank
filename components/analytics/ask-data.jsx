@@ -23,6 +23,7 @@ import {
   buildQuestionQualitySummary,
   buildQuestionStatsRows,
   buildQuestionStatsSummary,
+  buildStudentDetailRanking,
   buildStudentDetailRows,
   buildStudentDetailSummary,
   buildStudentDetailWrongRows,
@@ -193,10 +194,11 @@ export function AskData({
           return
         }
         const rows = buildStudentDetailRows(detail, nodes)
+        const ranking = buildStudentDetailRanking(detail, nodes)
         const wrong = buildStudentDetailWrongRows(detail)
         setResult({
           ...intent,
-          summary: buildStudentDetailSummary(detail, rows, wrong),
+          summary: buildStudentDetailSummary(detail, rows, wrong, ranking),
           rows,
           wrong,
         })

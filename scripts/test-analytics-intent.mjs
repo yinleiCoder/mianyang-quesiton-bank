@@ -12,6 +12,7 @@ import {
   buildQuestionQualitySummary,
   buildQuestionStatsRows,
   buildQuestionStatsSummary,
+  buildStudentDetailRanking,
   buildStudentDetailRows,
   buildStudentDetailSummary,
   buildStudentDetailWrongRows,
@@ -406,6 +407,33 @@ ok("学生摘要：带姓名/正确率/错题", () => {
   assert.ok(summary.includes("25%"))
   assert.ok(summary.includes("Word"))
   assert.ok(summary.includes("4 次"))
+})
+
+// 2026-11-05 用户提："问『Word/Excel/PPT/Access 中该同学擅长哪个、不擅长哪个』回答不了"。
+// 摘要只报最弱等于只答了一半，现在两头都说。
+ok("学生摘要：强项与弱项都要说（问「擅长哪个」能答）", () => {
+  const detail = {
+    student: { name: "小明" },
+    node_accuracy: [
+      { node_id: "w", attempts: 10, correct: 9 },
+      { node_id: "e", attempts: 10, correct: 8 },
+      { node_id: "p", attempts: 10, correct: 5 },
+      { node_id: "a", attempts: 10, correct: 2 },
+    ],
+    wrong_questions: [],
+  }
+  const skillNodes = [
+    { id: "w", name: "Word", parent_id: null, scope: "common", kind: "course" },
+    { id: "e", name: "Excel", parent_id: null, scope: "common", kind: "course" },
+    { id: "p", name: "PPT", parent_id: null, scope: "common", kind: "course" },
+    { id: "a", name: "Access", parent_id: null, scope: "common", kind: "course" },
+  ]
+  const rows = buildStudentDetailRows(detail, skillNodes)
+  const ranking = buildStudentDetailRanking(detail, skillNodes)
+  const summary = buildStudentDetailSummary(detail, rows, [], ranking)
+  assert.ok(summary.includes("掌握较好的是 Word（90%）、Excel（80%）"), summary)
+  assert.ok(summary.includes("较弱的是 Access（20%）"), summary)
+  assert.equal(ranking[0].name, "Word")
 })
 
 console.log(`\n${passed} 项通过`)
