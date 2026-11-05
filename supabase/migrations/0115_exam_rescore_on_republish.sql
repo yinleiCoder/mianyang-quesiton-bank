@@ -1,5 +1,9 @@
 -- 0115: 试卷改版入库时，旧交卷按**新版答案**重算并迁到新版
 --
+-- ⚠ **2026-11-02 产品口径反转，本文件的「发布时迁移/重算」已停用（见 0118）。**
+-- 发布新版不再影响旧版成绩：旧场次留在原版本，成绩榜跨版本取每人最新一次。
+-- 下面的函数保留仅备手工修复；**不要把触发器重新启用**。
+--
 -- 用户 2026-10-29 报：组卷库的「四川省2024年高职教育单招」（计算机类试题）
 -- 发布第三版后，之前 119 名学生的成绩在成绩榜上"不在了"。
 --
@@ -377,28 +381,14 @@ create trigger trg_papers_rescore_on_publish
         and new.current_published_version_id is not null)
   execute function public.trg_papers_rescore_on_publish();
 
+-- 2026-11-02 口径反转：默认停用，避免新环境一跑就迁旧场次（0118 也会再停一次）。
+alter table public.papers disable trigger trg_papers_rescore_on_publish;
+
 -- =====================================================================
--- 3) 回填：把线上已经"落在旧版本上"的成绩按同一口径迁到当前入库版本
---    （2026-10-29 线上只有「24年单招」一份卷命中：v2 的 130 场 → v3）
+-- 3) 回填：**2026-11-02 起不再自动执行**
+--    旧口径是「把落在旧版本上的成绩迁到当前版本」；新口径是「旧版成绩不迁移、
+--    不重算，成绩榜跨版本取每人最新一次」。确需手工修复时，先备份，再显式调用
+--    public.rescore_attempts_for_version(paper_id, version_id)。
 -- =====================================================================
-do $$
-declare
-  r record;
-  v_res jsonb;
-begin
-  for r in
-    select p.id as paper_id, p.current_published_version_id as version_id
-    from papers p
-    where p.current_published_version_id is not null
-      and exists (
-        select 1 from exam_attempts a
-        where a.paper_id = p.id
-          and a.paper_version_id <> p.current_published_version_id
-          and a.status in ('submitted', 'grading', 'graded', 'in_progress'))
-  loop
-    v_res := public.rescore_attempts_for_version(r.paper_id, r.version_id);
-    raise notice '0115 回填 %: %', r.paper_id, v_res;
-  end loop;
-end $$;
 
 notify pgrst, 'reload schema';

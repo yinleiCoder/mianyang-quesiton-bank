@@ -11,11 +11,13 @@
 // 权限：can_view_class（与班级学情看板一致），越权时 RPC 抛 42501 → 显示「不能查看」。
 import { requireUser, getAuthContext } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
-import { loadClassAiReport } from "@/lib/class-ai"
+import { loadClassAiReport, loadClassErrorDiagnosis } from "@/lib/class-ai"
 import { percentText } from "@/lib/analytics"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
 import { AiReportPanel } from "@/components/classes/ai-report-panel"
+import { ErrorDiagnosisPanel } from "@/components/classes/error-diagnosis-panel"
+import { LessonPlanPanel } from "@/components/classes/lesson-plan-panel"
 import { ScoreDistribution } from "@/components/classes/score-distribution"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -46,6 +48,10 @@ export default async function ClassAiReportPage({ params }) {
     )
   }
   if (error) throw error
+
+  // 0134 才有的缓存：迁移未执行时只是取不到，按需生成照常可用。
+  const diagnosis = await loadClassErrorDiagnosis(supabase, { paperId, classId: id })
+  const cachedDiagnosis = diagnosis.data?.content ?? null
 
   const info = data?.class ?? {}
   const paper = data?.paper ?? {}
@@ -115,6 +121,24 @@ export default async function ClassAiReportPage({ params }) {
       </Card>
 
       <AiReportPanel paperId={paperId} classId={id} initial={data} paperTitle={paper.title} />
+      <ErrorDiagnosisPanel
+        paperId={paperId}
+        classId={id}
+        initialDiagnosis={cachedDiagnosis?.diagnosis ?? null}
+        initialQuestions={cachedDiagnosis?.questions ?? null}
+        initialFingerprint={diagnosis.data?.fingerprint ?? null}
+        initialMeta={
+          cachedDiagnosis
+            ? {
+                stale: diagnosis.data?.stale === true,
+                createdAt: diagnosis.data?.created_at ?? null,
+                authorName: diagnosis.data?.created_by_name ?? "",
+                authorLeft: diagnosis.data?.author_left === true,
+              }
+            : null
+        }
+      />
+      <LessonPlanPanel paperId={paperId} classId={id} initial={data} />
     </div>
   )
 }

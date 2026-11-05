@@ -45,6 +45,42 @@ const COPY = {
         ? "纯文本能力更强；分析只发文字数据，两个模型都能用"
         : "速度快、价格低；做班级分析够用",
   },
+  audit: {
+    keyName: "审题密钥",
+    feature: "AI 审题",
+    cost: "（一次审题约几分钱）",
+    hint: (m) =>
+      m.value === "deepseek-v4-pro"
+        ? "纯文本审题能力更强；只发题目内容，不发学生数据"
+        : "速度快、价格低；审题够用",
+  },
+  lesson: {
+    keyName: "教案密钥",
+    feature: "AI 教案",
+    cost: "（一次教案约几分钱）",
+    hint: (m) =>
+      m.value === "deepseek-v4-pro"
+        ? "纯文本教案能力更强；只发班级报告，不发姓名"
+        : "速度快、价格低；教案够用",
+  },
+  grade: {
+    keyName: "评分密钥",
+    feature: "AI 评分",
+    cost: "（一次评分约几分钱）",
+    hint: (m) =>
+      m.value === "deepseek-v4-pro"
+        ? "纯文本评分能力更强；只发题目与学生作答，不发姓名"
+        : "速度快、价格低；评分够用",
+  },
+  settings: {
+    keyName: "AI 密钥",
+    feature: "所有 AI 功能",
+    cost: "（导入一份卷子约 ¥1~2；分析/审题/教案/评分每次约几分钱）",
+    hint: (m) =>
+      m.value === "deepseek-v4-pro"
+        ? "该模型不支持图片：含扫描件/拍照页的整卷导入会失败；分析/审题/教案/评分仍可用"
+        : "支持图片，整卷导入可用；分析/审题/教案/评分也能用",
+  },
 }
 
 export function DeepSeekSettingsPanel({ onChange, compact = false, purpose = "parse" }) {

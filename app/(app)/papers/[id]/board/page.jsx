@@ -5,10 +5,12 @@
 // （与 /students/[id] 同一条做法：一个 RPC = 一个 await，不拆多个 Suspense 边界）。
 //
 // 三处口径必须在页面上说清楚，否则会被当成 bug：
-//   · 只统计**官方成绩**——同一份卷面只有第一次交卷计入，重做是自主练习；
+//   · 只统计**官方成绩**——重做是自主练习；
 //   · 排行榜只收**已出分**的；**试题分析收已交卷的**（含待阅卷）——客观题交卷即定稿，
 //     而讲评往往在最后一题判完之前就要开；
-//   · 两者都只看**当前入库版本**，旧版场次单独计数。
+//   · **成绩排行跨版本合并，每人取最新一次官方成绩**（发布新版不影响旧版成绩，
+//     0118）；**试题分析只绑定当前入库版本**（逐题分析必须对应一份卷面），
+//     旧版场次在试题分析页签单独计数。
 //
 // 试题分析还有一条硬门禁（0078）：**学生必须自己已经出分**才能看——
 // 选项分布 + 标准答案合起来就是答案本身。教师不受此限。
@@ -21,12 +23,15 @@ import {
   parseAnalyticsFilters,
   percentText,
 } from "@/lib/analytics"
+import { loadPaperQuality } from "@/lib/quality"
 import { AutoRefresh } from "@/components/analytics/auto-refresh"
+import { AskData } from "@/components/analytics/ask-data"
 import { BoardTabs } from "@/components/analytics/board-tabs"
 import { ScopeTabs } from "@/components/analytics/scope-tabs"
 import { LeaderboardTable } from "@/components/analytics/leaderboard-table"
 import { MyRankCard } from "@/components/analytics/my-rank-card"
 import { QuestionStatsList } from "@/components/analytics/question-stats-list"
+import { QuestionQualityPanel } from "@/components/analytics/question-quality-panel"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
@@ -109,6 +114,8 @@ export default async function PaperBoardPage({ params, searchParams }) {
       scope,
       classId: activeClassId,
     })
+    // 试题质量诊断是教师/管理员口径；学生即使能看到选项分布，也不显示质量分。
+    const quality = isStaff ? await loadPaperQuality(supabase, id) : null
     if (denied) {
       return (
         <AccessDenied
@@ -148,6 +155,16 @@ export default async function PaperBoardPage({ params, searchParams }) {
           <>
             <ScopeTabs {...shared} />
             {aiLink}
+            {isStaff && (
+              <AskData
+                paperId={id}
+                paperTitle={info.title || ""}
+                scope={scope}
+                activeClassId={activeClassId}
+                isStaff={isStaff}
+              />
+            )}
+            {quality?.data && <QuestionQualityPanel data={quality.data} />}
             <QuestionStatsList items={stats?.items ?? []} studentLimit={stats?.student_limit ?? 50} />
           </>
         )}
@@ -184,8 +201,8 @@ export default async function PaperBoardPage({ params, searchParams }) {
             {paperInfo.exam_name ? ` · ${paperInfo.exam_name}` : ""}
             <span className="mx-2 text-muted-foreground">·</span>
             <span className="text-muted-foreground">
-              只有<b className="font-medium text-foreground">第一次</b>交卷计入排行（重做算自主练习），
-              主观题判完出分后才进榜。
+              每人取<b className="font-medium text-foreground">最新一次官方成绩</b>（含旧版本，
+              发布新版不影响旧版成绩；重做算自主练习），主观题判完出分后才进榜。
             </span>
           </>
         }
@@ -201,6 +218,15 @@ export default async function PaperBoardPage({ params, searchParams }) {
         <>
           <ScopeTabs {...shared} />
           {aiLink}
+          {isStaff && (
+            <AskData
+              paperId={id}
+              paperTitle={paperInfo.title || ""}
+              scope={scope}
+              activeClassId={activeClassId}
+              isStaff={isStaff}
+            />
+          )}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm">
             <span>
               上榜 <b className="tabular-nums">{stats.total ?? 0}</b> 人

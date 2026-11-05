@@ -286,7 +286,7 @@ export function ImportPage({ nodes, jobs, initial }) {
           onRePick={() => fileInputRef.current?.click()}
         />
       ) : (
-        <ImportPreview job={job} items={items} onRefresh={refresh} />
+        <ImportPreview job={job} items={items} nodes={nodes} onRefresh={refresh} />
       )}
     </div>
   )

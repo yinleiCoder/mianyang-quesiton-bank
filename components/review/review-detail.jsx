@@ -10,6 +10,7 @@ import { statusChip } from "@/lib/question-model"
 import { fmtDateTime24 } from "@/lib/format"
 import { contentFlowSteps, deriveChain, requestFlowSteps } from "@/lib/approval-flow"
 import { QuestionView } from "@/components/questions/question-view"
+import { QuestionAuditPanel } from "@/components/questions/question-audit-panel"
 import { ApprovalFlowCanvas } from "@/components/review/approval-flow-canvas"
 import { Reveal } from "@/components/ui/reveal"
 import { Button } from "@/components/ui/button"
@@ -154,6 +155,9 @@ export function ReviewDetail({ data }) {
                 {versionChip.text}
               </span>
             )}
+            {v?.aiGenerated && (
+              <Badge className="bg-violet-100 text-violet-700">AI 生成草稿</Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
             {data.question.nodePath} · {data.question.schoolName} · {data.question.creatorName} 提交
@@ -235,15 +239,30 @@ export function ReviewDetail({ data }) {
 
       {/* 题目渲染（审核视角：含答案与解析） */}
       {v && (
-        <div className="rounded-xl border p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{a.kindLabel}</Badge>
-            <span className="text-xs text-muted-foreground">
-              {data.question.courseNodeName} · 知识点：{data.tags.length > 0 ? data.tags.join("、") : "（无）"}
-            </span>
+        <>
+          <div className="rounded-xl border p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge variant="outline">{a.kindLabel}</Badge>
+              <span className="text-xs text-muted-foreground">
+                {data.question.courseNodeName} · 知识点：{data.tags.length > 0 ? data.tags.join("、") : "（无）"}
+              </span>
+            </div>
+            <QuestionView qtype={v.qtype} content={v.content} showAnswer />
           </div>
-          <QuestionView qtype={v.qtype} content={v.content} showAnswer />
-        </div>
+          <QuestionAuditPanel
+            content={v.content}
+            qtype={v.qtype}
+            difficulty={v.difficulty}
+            tags={data.tags}
+            questionId={data.question.id}
+            mode="review"
+            onFillComment={(text) => {
+              // 直接打开退回对话框并带上意见；不要走 openReturn()，它会先清空 comment。
+              setComment(text)
+              setReturnOpen(true)
+            }}
+          />
+        </>
       )}
 
       {/* 历史时间线 */}

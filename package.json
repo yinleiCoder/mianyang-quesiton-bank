@@ -11,7 +11,20 @@
     "test:pdf": "node --import ./scripts/jsx-loader.mjs scripts/test-pdf-export.mjs",
     "test:retry": "node --import ./scripts/alias-loader.mjs scripts/test-supabase-retry.mjs",
     "test:ai-report": "node scripts/test-ai-report.mjs",
-    "test:phone": "node scripts/test-phone.mjs"
+    "test:phone": "node scripts/test-phone.mjs",
+    "test:paper-ai": "node --import ./scripts/alias-loader.mjs scripts/test-paper-optimizer.mjs",
+    "test:paper-intent": "node --import ./scripts/alias-loader.mjs scripts/test-paper-intent.mjs",
+    "test:tag-suggest": "node --import ./scripts/alias-loader.mjs scripts/test-tag-suggest.mjs",
+    "test:variant": "node --import ./scripts/alias-loader.mjs scripts/test-variant.mjs",
+    "test:error-diagnosis": "node --import ./scripts/alias-loader.mjs scripts/test-error-diagnosis.mjs",
+    "test:profile": "node --import ./scripts/alias-loader.mjs scripts/test-profile-persona.mjs",
+    "test:analytics-intent": "node --import ./scripts/alias-loader.mjs scripts/test-analytics-intent.mjs",
+    "eval:intents": "node --import ./scripts/alias-loader.mjs scripts/eval-intents.mjs",
+    "test:ctt": "node --import ./scripts/alias-loader.mjs scripts/test-ctt.mjs",
+    "test:audit": "node --import ./scripts/alias-loader.mjs scripts/test-question-audit.mjs && node --import ./scripts/alias-loader.mjs scripts/test-question-audit-prompt.mjs",
+    "test:lesson": "node --import ./scripts/alias-loader.mjs scripts/test-lesson-plan.mjs",
+    "test:grading": "node --import ./scripts/alias-loader.mjs scripts/test-grading-prompt.mjs",
+    "backtest:practice": "node --import ./scripts/alias-loader.mjs scripts/backtest-practice-scheduler.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

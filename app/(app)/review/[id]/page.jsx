@@ -75,6 +75,16 @@ export default async function ReviewDetailPage({ params }) {
   ])
 
   const version = vRes.data
+  // 0132 才加的列：单独查一次，迁移未执行时只是不显示徽标，不挡审批详情。
+  let aiGenerated = false
+  if (version?.id) {
+    const { data: flagRow } = await supabase
+      .from("question_versions")
+      .select("ai_generated")
+      .eq("id", version.id)
+      .maybeSingle()
+    aiGenerated = flagRow?.ai_generated === true
+  }
   const timeline = tlRes.data ?? []
   const { byId: nodeMap, pathOf: nodePath } = indexNodes(nodes)
   const schoolMap = new Map((sRes.data ?? []).map((s) => [s.id, s.name]))
@@ -178,6 +188,7 @@ export default async function ReviewDetailPage({ params }) {
               difficulty: version.difficulty,
               difficultyLabel: difficultyLabel(version.difficulty),
               content: version.content,
+              aiGenerated,
               submittedAt: toISO(version.submitted_at),
               publishedAt: toISO(version.published_at),
             }

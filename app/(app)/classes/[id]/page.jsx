@@ -23,8 +23,10 @@ import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
 import { ParticipationPanel } from "@/components/classes/participation-panel"
 import { ExamResultsPanel } from "@/components/classes/exam-results-panel"
+import { ClassLearningProfileCard } from "@/components/classes/class-learning-profile-card"
 import { WeaknessPanel } from "@/components/classes/weakness-panel"
 import { AlertsPanel } from "@/components/classes/alerts-panel"
+import { AskData } from "@/components/analytics/ask-data"
 import { StudentTable } from "@/components/classes/student-table"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
@@ -119,8 +121,10 @@ export default async function ClassReportPage({ params, searchParams }) {
 
       {/* 考试结果放在最前面：用户要的是"尤其是考试卷结果"，它是这一页最该先看到的东西 */}
       <ExamResultsPanel results={examsRes.results} classId={id} />
+      <ClassLearningProfileCard classId={id} />
       <ParticipationPanel report={report} />
       <WeaknessPanel report={report} nodes={nodes ?? []} />
+      <AskData classId={id} className={info.name ?? ""} nodes={nodes ?? []} />
       <AlertsPanel report={report} />
       <StudentTable rows={rosterRes.rows ?? []} />
     </div>

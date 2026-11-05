@@ -16,7 +16,7 @@ import { PAGE_STATES, pageStateChip } from "@/lib/import-jobs"
 import { Button } from "@/components/ui/button"
 import { buildPagePayload } from "@/components/import/import-wizard"
 import { parseAndSavePages, MissingKeyError } from "@/lib/import-parse-client"
-import { DeepSeekSettingsPanel } from "@/components/import/deepseek-settings-panel"
+import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon } from "lucide-react"
 
@@ -312,7 +312,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
     <div className="space-y-4">
       {/* 没配密钥就不能跑：面板内联在跑批台顶部，配好即解锁。
           keyReady 之前不渲染面板（服务端与客户端首帧保持一致，否则会 hydration 失败） */}
-      {keyReady && !hasKey && <DeepSeekSettingsPanel onChange={refreshKey} />}
+      {keyReady && !hasKey && <AiConfigLink dialog onChange={refreshKey} />}
 
       <div className="flex flex-wrap items-center gap-2">
         {!running ? (

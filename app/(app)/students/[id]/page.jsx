@@ -4,11 +4,13 @@
 import Link from "next/link"
 import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
-import { loadStudentDetail } from "@/lib/students"
+import { loadStudentDetail, loadStudentLearningProfile } from "@/lib/students"
 import { loadSubjectNodes } from "@/lib/reference-data"
 import { AccessDenied } from "@/components/access-denied"
 import { PageHeader } from "@/components/page-header"
+import { LearningProfileCard } from "@/components/students/learning-profile-card"
 import { StudentDetail } from "@/components/students/student-detail"
+import { AskData } from "@/components/analytics/ask-data"
 import { ArrowLeftIcon } from "lucide-react"
 
 export const metadata = { title: "学生学情" }
@@ -21,9 +23,10 @@ export default async function StudentDetailPage({ params }) {
   }
 
   const supabase = await createClient()
-  const [nodes, { detail, denied, error }] = await Promise.all([
+  const [nodes, { detail, denied, error }, { profile }] = await Promise.all([
     loadSubjectNodes(),
     loadStudentDetail(supabase, id),
+    loadStudentLearningProfile(supabase, id),
   ])
   // 42501 = can_view_student 判定无权（跨专业 / 跨校 / 不是学生）。
   // 这不是"出错"，是正常的越权拦截，按 AccessDenied 渲染而不是抛给错误边界。
@@ -49,6 +52,8 @@ export default async function StudentDetailPage({ params }) {
         title={detail?.student?.name || "学生"}
         description="练习与考试数据来自学生在客户端（App）里的作答上报。"
       />
+      {profile && <LearningProfileCard profile={profile} />}
+      <AskData studentId={id} nodes={nodes} />
       <StudentDetail detail={detail} nodes={nodes} />
     </div>
   )

@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { NodeField } from "@/components/questions/node-field"
 import { TagPicker } from "@/components/questions/tag-picker"
-import { DeepSeekSettingsPanel } from "@/components/import/deepseek-settings-panel"
+import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { Loader2Icon, FileUpIcon, ScanTextIcon, ImageIcon } from "lucide-react"
 
 const ACCEPT = ".pdf,.docx,image/png,image/jpeg,image/webp"
@@ -216,7 +216,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
 
   return (
     <div className="space-y-5">
-      <DeepSeekSettingsPanel onChange={refreshKey} />
+      <AiConfigLink dialog onChange={refreshKey} />
 
       {/* 没有密钥时整块禁用：fieldset 会连带禁用里面的 input/button，不用逐个加 disabled。
           keyReady 为 false（还没读到密钥）时同样按未配置处理，服务端与客户端首帧一致 */}

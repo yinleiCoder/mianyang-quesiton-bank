@@ -9,7 +9,7 @@
 //
 // 生成是**三步**，中间任何一步失败都不写库：取数据 → 调模型 → 存结果。
 // 存的时候必须把服务端给的 fingerprint 原样带回去：生成期间要是又有人交卷/判分，
-// 服务端会拒收（40001），页面提示重新生成 —— 而不是把一份对不上号的结论存进"当前学情"。
+// 服务端会拒收（PT409），页面提示重新生成 —— 而不是把一份对不上号的结论存进"当前学情"。
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
@@ -21,7 +21,7 @@ import { buildAiReportMessages, validateAiReport } from "@/lib/ai-report-prompt"
 import { loadClassAiPayload, saveClassAiReport } from "@/lib/class-ai"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { fmtDateTime24 } from "@/lib/format"
-import { DeepSeekSettingsPanel } from "@/components/import/deepseek-settings-panel"
+import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { AiReportView } from "@/components/classes/ai-report-view"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,7 +31,7 @@ import { Loader2Icon, SparklesIcon, TriangleAlertIcon } from "lucide-react"
 
 export function AiReportPanel({ paperId, classId, initial, paperTitle }) {
   const router = useRouter()
-  const { ready, masked } = useDeepSeekPrefs()
+  const { ready, masked, refresh } = useDeepSeekPrefs()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState("")
   const [error, setError] = useState(null)
@@ -51,7 +51,7 @@ export function AiReportPanel({ paperId, classId, initial, paperTitle }) {
     setBusy(true)
     const supabase = createClient()
     try {
-      // 1) 取数据（服务端给的就是要发给模型的那份，含"学生N"编号，没有姓名）
+      // 1) 取数据（服务端给的就是要发给模型的那份，含学生真名）
       const { data, error: loadErr } = await loadClassAiPayload(supabase, { paperId, classId })
       if (loadErr || !data) throw new Error(loadErr?.message || "取不到这次考试的数据")
 
@@ -172,15 +172,15 @@ export function AiReportPanel({ paperId, classId, initial, paperTitle }) {
                 {busy ? "正在分析…" : report ? "重新生成" : "生成 AI 分析"}
               </Button>
               <span className="text-xs text-muted-foreground">
-                发给模型的只有"学生1、学生2"这样的编号，
-                <b>不含学生姓名</b>（实名名单在「试题分析」页）。
+                发给模型的数据包含学生姓名（<b>仅本班教师与本校授权管理者可见</b>）；
+                模型调用仍走你自己的密钥，网站不保存密钥。
                 {Number(summary.participants) > 0 ? `本次 ${summary.participants} 人有成绩` : ""}
               </span>
             </div>
-            <DeepSeekSettingsPanel compact purpose="analyze" />
+            <AiConfigLink compact onChange={refresh} />
           </div>
         ) : ready ? (
-          <DeepSeekSettingsPanel purpose="analyze" />
+          <AiConfigLink dialog onChange={refresh} />
         ) : (
           <div className="h-14 animate-pulse rounded-xl border bg-muted/40" />
         )}

@@ -34,6 +34,7 @@ import { paperStatusChip } from "@/lib/paper-workbench"
 import { QuestionPicker } from "@/components/papers/question-picker"
 import { PaperCanvas } from "@/components/papers/paper-canvas"
 import { PaperInspector } from "@/components/papers/paper-inspector"
+import { PaperAiPlanner } from "@/components/papers/paper-ai-planner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -43,6 +44,7 @@ import {
   RefreshCwIcon,
   PrinterIcon,
   ExternalLinkIcon,
+  SparklesIcon,
 } from "lucide-react"
 
 export function PaperEditor({ initialSnapshot, nodes }) {
@@ -57,6 +59,7 @@ export function PaperEditor({ initialSnapshot, nodes }) {
   // 「把卷面上未入库的题一键提交审核」的进度与本轮已提交数
   const [submittingQuestions, setSubmittingQuestions] = useState(null)
   const [submittedQuestions, setSubmittedQuestions] = useState(0)
+  const [aiOpen, setAiOpen] = useState(false)
 
   const view = useMemo(() => buildView(state), [state])
   const issues = useMemo(
@@ -344,6 +347,9 @@ export function PaperEditor({ initialSnapshot, nodes }) {
         >
           <RefreshCwIcon className="size-4" /> 刷新题目
         </Button>
+        <Button variant="outline" size="sm" onClick={() => setAiOpen(true)}>
+          <SparklesIcon className="size-4" /> 智能组卷
+        </Button>
         <Button
           variant="outline"
           size="sm" nativeButton={false} render={<a href={`/print/paper/${state.versionId}`} target="_blank" rel="noreferrer" />}
@@ -493,6 +499,22 @@ export function PaperEditor({ initialSnapshot, nodes }) {
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      <PaperAiPlanner
+        key={state.updatedUs ?? "new"}
+        open={aiOpen}
+        onOpenChange={setAiOpen}
+        courseNodeId={state.courseNodeId}
+        courseNodeName={nodes.find((node) => node.id === state.courseNodeId)?.name ?? null}
+        nodes={nodes}
+        defaultSections={view.sections}
+        initialTarget={view.target}
+        onApply={(payload) => {
+          dispatch({ type: "applyPlan", ...payload })
+          setAiOpen(false)
+          toast.success("方案已应用到卷面，请检查后保存")
+        }}
+      />
 
       <p className="text-xs text-muted-foreground">
         快捷键 Ctrl/⌘+S 保存。题目只能来自题库——要新增题目请到

@@ -32,7 +32,10 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { BlockEditor } from "@/components/questions/block-editor"
 import { TagPicker } from "@/components/questions/tag-picker"
+import { TagSuggest } from "@/components/questions/tag-suggest"
+import { VariantDialog } from "@/components/questions/variant-dialog"
 import { NodeField } from "@/components/questions/node-field"
+import { QuestionAuditPanel } from "@/components/questions/question-audit-panel"
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
@@ -42,6 +45,7 @@ import {
   PlusIcon,
   SaveIcon,
   SendIcon,
+  SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
@@ -322,12 +326,14 @@ export function QuestionEditor({
   returnedNote = null, // { comment, decidedByName, decidedAt }
   mode = "new",
   reviseQuestionId = null, // 改版模式：已入库题 id；保存走 create_edit_draft（新版本草稿），节点沿用原题
+  aiGenerated = false, // 变式题等 AI 草稿的持久化标记
 }) {
   const router = useRouter()
   const [d, setD] = useState(() => initial ?? defaultDraft())
   const [vid, setVid] = useState(versionId)
   const [busy, setBusy] = useState("") // '' | 'save' | 'submit'
   const [warn, setWarn] = useState([])
+  const [variantOpen, setVariantOpen] = useState(false)
   const revising = Boolean(reviseQuestionId)
   // 查重：题干边写边查（防抖 600ms），**只提示、不拦保存**
   const [similar, setSimilar] = useState([])
@@ -546,6 +552,9 @@ export function QuestionEditor({
                     : "草稿已落库"}
               </Badge>
             )}
+            {aiGenerated && (
+              <Badge className="bg-violet-100 text-violet-700">AI 生成草稿</Badge>
+            )}
             {warn.length > 0 && <Badge className="bg-rose-100 text-rose-700">{warn.length} 处待修正</Badge>}
             <p className="text-xs text-muted-foreground">
               {d.qtype === "composite"
@@ -674,6 +683,17 @@ export function QuestionEditor({
             {/* 带上科目：候选只出该学科下的知识点，新建的也直接归到它下面（0096）。
                 传 nodes 是为了把"选定科目"展开成整棵子树——挂在父级学科上的知识点，
                 它下面的课程题目也该能选到。 */}
+            <TagSuggest
+              draft={d}
+              subjectNodeId={d.nodeId}
+              nodes={nodes}
+              value={d.tags}
+              onAdd={(tags) => {
+                const existing = new Set(d.tags.map((tag) => tag.id))
+                const next = [...d.tags, ...tags.filter((tag) => !existing.has(tag.id))]
+                if (next.length !== d.tags.length) set({ tags: next })
+              }}
+            />
             <TagPicker
               value={d.tags}
               onChange={(tags) => set({ tags })}
@@ -694,11 +714,31 @@ export function QuestionEditor({
         </CardContent>
       </Card>
 
+      <QuestionAuditPanel
+        draft={d}
+        qtype={d.qtype}
+        difficulty={d.difficulty}
+        tags={d.tags}
+        hasNode={Boolean(d.nodeId)}
+        questionId={reviseQuestionId}
+        similar={similar}
+        mode="author"
+      />
+
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-2 rounded-xl border bg-background/95 p-2 shadow-sm backdrop-blur">
         <p className="mr-auto px-2 text-xs text-muted-foreground">
           {qtypeLabel(d.qtype)} · {difficultyLabel(d.difficulty)}难度
           {d.nodeId ? " · 已选题" : ""}
         </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setVariantOpen(true)}
+          disabled={Boolean(busy) || !d.nodeId}
+        >
+          <SparklesIcon className="size-4" />
+          生成变式题
+        </Button>
         <Button variant="outline" onClick={() => router.push("/questions")} disabled={Boolean(busy)}>
           取消
         </Button>
@@ -711,6 +751,13 @@ export function QuestionEditor({
           提交审核
         </Button>
       </div>
+
+      <VariantDialog
+        open={variantOpen}
+        onOpenChange={setVariantOpen}
+        draft={d}
+        nodes={nodes}
+      />
     </div>
   )
 }

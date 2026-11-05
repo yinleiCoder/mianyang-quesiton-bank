@@ -1,8 +1,8 @@
 // 跑法：node scripts/test-ai-report.mjs
 //
 // 只测 lib/ai-report-prompt.js 的拼装与校验。为什么值得钉死：
-//   · "不要猜姓名"是**产品口径**（0088 只给"学生N"编号）——提示词里漏掉这句，
-//     模型就会写"张同学"，教师会当成真事；
+//   · 2026-11-03 起数据里是**学生真名**：提示词必须要求"只使用数据里的姓名、
+//     不要猜/不要编造"——漏掉这句，模型会写数据里没有的人名，教师会当成真事；
 //   · 校验函数是"半截报告不许入库"的唯一一道门，判定反了会把残缺内容存成班级结论。
 import assert from "node:assert/strict"
 import { SYSTEM_PROMPT, buildAiReportMessages, validateAiReport, arr } from "../lib/ai-report-prompt.js"
@@ -34,10 +34,10 @@ const PAYLOAD = {
       correct: 4,
       correct_rate: 0.6667,
       options: [
-        { key: "A", is_answer: false, count: 2, students: ["学生3", "学生5"] },
-        { key: "C", is_answer: true, count: 4, students: ["学生1", "学生2"] },
+        { key: "A", is_answer: false, count: 2, students: ["张伟", "李娜"] },
+        { key: "C", is_answer: true, count: 4, students: ["王芳", "刘洋"] },
       ],
-      wrong: ["学生3", "学生5"],
+      wrong: ["张伟", "李娜"],
     },
   ],
 }
@@ -73,9 +73,11 @@ t("教师填了复习进度：原文进 user 消息，并要求 plan 与它对�
   assert.ok(text.includes("对齐"))
 })
 
-t("提示词里必须有「不要猜姓名」这条口径", () => {
+t("提示词要求只使用数据里的姓名、不得猜或编造", () => {
   assert.ok(SYSTEM_PROMPT.includes("不要猜姓名"))
-  assert.ok(SYSTEM_PROMPT.includes("学生"))
+  assert.ok(SYSTEM_PROMPT.includes("不要编造"))
+  assert.ok(SYSTEM_PROMPT.includes("姓名"))
+  assert.ok(!SYSTEM_PROMPT.includes("学生N"))
 })
 
 // ---- 校验：模型返回的东西能不能入库 ----

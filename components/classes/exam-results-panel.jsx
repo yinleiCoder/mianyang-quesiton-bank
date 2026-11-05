@@ -9,8 +9,8 @@ import { Reveal } from "@/components/ui/reveal"
 //
 // 与同一页其它面板的分工：那边是**练习**（0079 的参与度/知识点/预警），这边是**考试**。
 // 三条口径必须写在明面上，因为它们决定了数字怎么读：
-//   · 只算**第一次交卷**（同一份卷面重做是自主练习，0076 的 is_official）；
-//   · 只算**当前入库版本**（改版后满分与题都变了，混排不公平）；
+//   · **每人每卷取最新一次官方成绩**（同一版本内重做是自主练习，0076 的 is_official）；
+//   · **成绩跨版本合并**（发布新版不影响旧版成绩，0118）；
 //   · **没有"布置考试"**——学生是自己从试卷库挑卷考的，所以"参加 5/27 人"是常态而不是异常。
 //
 // 「进步最大」= 同一学生在这份卷与**上一份卷**上的得分率之差（中间那场缺考的不参与），
@@ -26,7 +26,7 @@ export function ExamResultsPanel({ results, classId }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium">考试结果（近 {days} 天）</h2>
         <span className="text-xs text-muted-foreground">
-          只算第一次交卷 · 只算当前入库版本 · 学生自助考卷，不是教师布置
+          每人每卷取最新一次官方成绩（跨版本）· 学生自助考卷，不是教师布置
         </span>
       </div>
 

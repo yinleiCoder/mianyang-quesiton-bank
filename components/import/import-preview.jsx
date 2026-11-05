@@ -17,6 +17,15 @@ import { createClient } from "@/lib/supabase/client"
 import { FLAG_LABELS } from "@/lib/import-jobs"
 import { blocksToPlain, draftIssues, itemFingerprint } from "@/lib/import-pipeline"
 import { qtypeLabel, DIFFICULTIES } from "@/lib/question-model"
+import { getDeepSeekKey, getDeepSeekModel } from "@/lib/deepseek-prefs"
+import { callChat, salvageJson } from "@/lib/deepseek"
+import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
+import {
+  buildTagSuggestMessages,
+  validateTagSuggestion,
+} from "@/lib/tag-suggest-prompt"
+import { TAG_FULL_COLUMNS, tagsInScope } from "@/lib/tag-tree"
+import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -29,6 +38,7 @@ import {
   Loader2Icon,
   PencilIcon,
   RotateCcwIcon,
+  SparklesIcon,
   Undo2Icon,
   XCircleIcon,
 } from "lucide-react"
@@ -94,11 +104,66 @@ function answerText(content) {
   return null
 }
 
-export function ImportPreview({ job, items, onRefresh }) {
+export function ImportPreview({ job, items, nodes = [], onRefresh }) {
+  const { hasKey, refresh: refreshAi } = useDeepSeekPrefs()
   const [filter, setFilter] = useState("all")
   const [editing, setEditing] = useState(null) // item id（条件挂载用）
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(null)
+  const [allTags, setAllTags] = useState([])
+  // item_id → { tags:[{...tag,confidence,reason}], caveats, warnings }
+  const [tagSuggestions, setTagSuggestions] = useState(() => new Map())
+  // item_id → 已采纳/已保存的 [{id,name}]
+  const [itemTags, setItemTags] = useState(() => new Map())
+  const [tagBusy, setTagBusy] = useState(false)
+
+  // 标签字典只取一次；0129 未执行时 import_job_items 的 tag_ids 会由 loader 回退为空数组，
+  // 这里仍能正常显示/推荐，只是无法把逐题标签落库。
+  useEffect(() => {
+    let alive = true
+    const supabase = createClient()
+    supabase
+      .from("tags")
+      .select(TAG_FULL_COLUMNS)
+      .order("name")
+      .then(({ data }) => {
+        if (alive) setAllTags(data ?? [])
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const tagPool = useMemo(
+    () => (job?.course_node_id ? tagsInScope(allTags, job.course_node_id, nodes) : []),
+    [allTags, job?.course_node_id, nodes]
+  )
+
+  // 已保存的逐题标签（刷新后仍显示）：item.tag_ids + 标签字典 → [{id,name}]
+  useEffect(() => {
+    if (items.length === 0) return
+    const byId = new Map(allTags.map((tag) => [tag.id, tag]))
+    setItemTags((prev) => {
+      let changed = false
+      const next = new Map(prev)
+      for (const item of items) {
+        if (next.has(item.id)) continue
+        const ids = item.tag_ids ?? []
+        if (ids.length === 0) continue
+        const tags = ids.map((id) => byId.get(id)).filter(Boolean)
+        if (tags.length > 0) {
+          next.set(item.id, tags)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [items, allTags])
+
+  const tagSuggestionCount = useMemo(
+    () => [...tagSuggestions.values()].filter((item) => item.tags.length > 0).length,
+    [tagSuggestions]
+  )
   // 乐观状态：id → status，勾选/取消**先落本地**。
   //
   // 为什么必须有：复选框的 checked 来自服务端的 status，而 React 处理完 change 事件后会把
@@ -319,6 +384,7 @@ export function ImportPreview({ job, items, onRefresh }) {
     const supabase = createClient()
     let ok = 0
     let failed = 0
+    let tagFailed = 0
     try {
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
@@ -330,16 +396,178 @@ export function ImportPreview({ job, items, onRefresh }) {
           toast.error(error.message)
           break
         }
-        for (const r of data ?? []) r.ok ? ok++ : failed++
+        for (const r of data ?? []) {
+          if (!r.ok) {
+            failed++
+            continue
+          }
+          ok++
+          // 任务级标签先由 import_questions_draft 写上；逐题标签在这里覆盖。
+          // 失败不挡入库（草稿已经建好），只提示一次。
+          const tags = itemTags.get(r.item_id)
+          if (tags?.length && r.version_id) {
+            const { error: tagError } = await supabase.rpc("set_question_draft_tags", {
+              p_version_id: r.version_id,
+              p_tag_ids: tags.map((tag) => tag.id),
+            })
+            if (tagError) tagFailed++
+          }
+        }
         setProgress({ done: Math.min(i + CHUNK, ids.length), total: ids.length })
       }
       if (ok > 0) toast.success(`已生成 ${ok} 份草稿${failed ? `，${failed} 道失败（见行内提示）` : ""}`)
       else if (failed > 0) toast.error(`${failed} 道没能入库，请看行内原因`)
+      if (tagFailed > 0) {
+        toast.warning(`${tagFailed} 道草稿的逐题标签没写上；草稿已保留任务级标签（0129 迁移是否已执行？）`)
+      }
     } finally {
       setBusy(false)
       setProgress(null)
       await onRefresh()
     }
+  }
+
+  async function suggestTags() {
+    const targets = view
+      .filter((item) => keptIds.includes(item.id) && item.status !== "imported")
+      .filter((item) => blocksToPlain(item.content?.stem ?? []).trim().length >= 10)
+    if (targets.length === 0) {
+      toast.error("先勾选要入库的题目；题干太短的题会跳过")
+      return
+    }
+    const key = getDeepSeekKey()
+    if (!key) {
+      toast.error("请先在「AI 配置」里填写密钥")
+      return
+    }
+    if (tagPool.length === 0) {
+      toast.error("该科目下还没有知识点标签，先去管理台建树")
+      return
+    }
+
+    setTagBusy(true)
+    const next = new Map()
+    let ok = 0
+    let failed = 0
+    try {
+      for (let i = 0; i < targets.length; i += 2) {
+        const chunk = targets.slice(i, i + 2)
+        const results = await Promise.allSettled(
+          chunk.map(async (item) => {
+            const messages = buildTagSuggestMessages({
+              qtype: item.qtype,
+              content: item.content,
+              tags: tagPool,
+              selectedTagIds: (itemTags.get(item.id) ?? []).map((tag) => tag.id),
+            })
+            let check = null
+            let lastReason = ""
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 800 * attempt))
+              const res = await callChat({
+                messages,
+                apiKey: key,
+                model: getDeepSeekModel() || undefined,
+                maxTokens: 800,
+                temperature: 0.2,
+              })
+              check = validateTagSuggestion(salvageJson(res.content), {
+                allowedTags: tagPool,
+                selectedTagIds: (itemTags.get(item.id) ?? []).map((tag) => tag.id),
+              })
+              if (check.ok) break
+              lastReason = res.finishReason === "length" ? "输出被截断" : check.reason
+            }
+            if (!check?.ok) throw new Error(lastReason || "格式不对")
+            const tags = check.suggestion.tags
+              .map((entry) => {
+                const tag = tagPool.find((candidate) => candidate.id === entry.tag_id)
+                return tag
+                  ? { ...tag, confidence: entry.confidence, reason: entry.reason }
+                  : null
+              })
+              .filter(Boolean)
+            return {
+              itemId: item.id,
+              tags,
+              caveats: check.suggestion.caveats,
+              warnings: check.warnings,
+            }
+          })
+        )
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            next.set(result.value.itemId, result.value)
+            ok++
+          } else {
+            failed++
+          }
+        }
+        setTagSuggestions(new Map(next))
+      }
+      toast.success(`已为 ${ok} 道题推荐标签${failed ? `；${failed} 道失败` : ""}`)
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  async function acceptTags(itemId, tags) {
+    if (!tags?.length) return
+    const supabase = createClient()
+    const { error: saveError } = await supabase.rpc("import_set_item_tags", {
+      p_item_id: itemId,
+      p_tag_ids: tags.map((tag) => tag.id),
+    })
+    if (saveError) {
+      toast.error(saveError.message)
+      return
+    }
+    setItemTags((prev) => new Map(prev).set(itemId, tags))
+    setTagSuggestions((prev) => {
+      const next = new Map(prev)
+      next.delete(itemId)
+      return next
+    })
+  }
+
+  async function acceptAllTags() {
+    const entries = [...tagSuggestions.entries()].filter(
+      ([, suggestion]) => suggestion.tags.length > 0
+    )
+    if (entries.length === 0) return
+    setTagBusy(true)
+    const supabase = createClient()
+    let ok = 0
+    try {
+      for (const [itemId, suggestion] of entries) {
+        const { error: saveError } = await supabase.rpc("import_set_item_tags", {
+          p_item_id: itemId,
+          p_tag_ids: suggestion.tags.map((tag) => tag.id),
+        })
+        if (saveError) {
+          toast.error(saveError.message)
+          break
+        }
+        ok++
+        setItemTags((prev) => new Map(prev).set(itemId, suggestion.tags))
+        setTagSuggestions((prev) => {
+          const next = new Map(prev)
+          next.delete(itemId)
+          return next
+        })
+      }
+      if (ok > 0) toast.success(`已采纳 ${ok} 道题的标签`)
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  function ignoreTags(itemId) {
+    setTagSuggestions((prev) => {
+      const next = new Map(prev)
+      next.delete(itemId)
+      return next
+    })
   }
 
   return (
@@ -363,6 +591,20 @@ export function ImportPreview({ job, items, onRefresh }) {
           </button>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={suggestTags}
+            disabled={busy || tagBusy || keptIds.length === 0}
+          >
+            {tagBusy ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <SparklesIcon className="size-3.5" />
+            )}
+            AI 推荐标签
+          </Button>
+          {!hasKey && <AiConfigLink compact onChange={refreshAi} />}
           <Button size="sm" variant="outline" onClick={keepAll} disabled={busy}>
             全部保留（跳过缺答案的）
           </Button>
@@ -387,6 +629,14 @@ export function ImportPreview({ job, items, onRefresh }) {
               {dups.size} 道与题库有相似题（点条目上的「查重」看详情）
             </span>
           )
+        )}
+        {tagSuggestionCount > 0 && (
+          <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            AI 已为 {tagSuggestionCount} 道题推荐标签
+            <Button size="sm" variant="secondary" onClick={acceptAllTags} disabled={tagBusy}>
+              全部采纳
+            </Button>
+          </span>
         )}
         <Button size="sm" onClick={importSelected} disabled={busy || keptIds.length === 0}>
           {busy ? <Loader2Icon className="size-4 animate-spin" /> : <CheckCircle2Icon className="size-4" />}
@@ -418,6 +668,8 @@ export function ImportPreview({ job, items, onRefresh }) {
           const kept = it.status === "kept" || it.status === "imported"
           const skipped = it.status === "skipped"
           const issues = draftIssues(it.qtype, it.content)
+          const suggestion = tagSuggestions.get(it.id)
+          const accepted = itemTags.get(it.id)
           return (
             <div
               key={it.id}
@@ -575,6 +827,61 @@ export function ImportPreview({ job, items, onRefresh }) {
                   <span className="text-rose-600">未指定答案</span>
                 )}
               </p>
+              {(suggestion || accepted?.length > 0) && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-muted-foreground">标签：</span>
+                  {accepted?.length > 0 ? (
+                    accepted.map((tag) => (
+                      <span
+                        key={tag.id}
+                        className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700"
+                      >
+                        {tag.name}
+                      </span>
+                    ))
+                  ) : suggestion.tags.length === 0 ? (
+                    <span className="text-muted-foreground">没有匹配的标签</span>
+                  ) : (
+                    suggestion.tags.map((tag) => (
+                      <span
+                        key={tag.id}
+                        title={tag.reason}
+                        className="rounded bg-sky-100 px-1.5 py-0.5 text-sky-700"
+                      >
+                        {tag.name} · {Math.round(tag.confidence * 100)}%
+                      </span>
+                    ))
+                  )}
+                  {suggestion?.tags?.length > 0 && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => acceptTags(it.id, suggestion.tags)}
+                        disabled={tagBusy || it.status === "imported"}
+                      >
+                        采纳
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => ignoreTags(it.id)}
+                        disabled={tagBusy}
+                      >
+                        忽略
+                      </Button>
+                    </>
+                  )}
+                  {suggestion?.caveats && (
+                    <span className="text-muted-foreground">{suggestion.caveats}</span>
+                  )}
+                  {suggestion?.warnings?.length > 0 && (
+                    <span className="text-amber-700">{suggestion.warnings[0]}</span>
+                  )}
+                </div>
+              )}
               {it.source_quote && (
                 <p className="mt-1 line-clamp-1 text-xs text-muted-foreground/70">
                   原文：{it.source_quote}

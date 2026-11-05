@@ -47,9 +47,20 @@ export default async function EditQuestionPage({ params }) {
     return (
       <AccessDenied
         title="该题当前不可编辑"
-        description="审核中或已入库的题目不能直接修改：审核中请先在我的题目里撤回；已入库题目的修改将以新版本走审批（后续版本提供）。"
+        description="审核中或已入库的题目不能直接修改：审核中请先在「我的题目」里撤回；已入库题目的修改将以新版本走审批（后续版本提供）。"
       />
     )
+  }
+
+  // 0132 才加的列：单独查一次，迁移未执行时字段缺失只会让 flag 为 false，不挡编辑页。
+  let aiGenerated = false
+  {
+    const { data: flagRow } = await supabase
+      .from("question_versions")
+      .select("ai_generated")
+      .eq("id", working.id)
+      .maybeSingle()
+    aiGenerated = flagRow?.ai_generated === true
   }
 
   const [nodes, tagsRes, notesRes] = await Promise.all([
@@ -93,6 +104,7 @@ export default async function EditQuestionPage({ params }) {
         nodes={nodes}
         initial={initial}
         versionId={working.id}
+        aiGenerated={aiGenerated}
         returnedNote={
           note
             ? {

@@ -52,6 +52,7 @@ import {
   MegaphoneIcon,
   MessageSquareIcon,
   ScrollTextIcon,
+  Settings2Icon,
   SparklesIcon,
   TagsIcon,
   CircleUserRoundIcon,
@@ -104,6 +105,18 @@ function useNavItems(
     // 复习资料：全市共享，所有登录用户都能看；上传/删除按钮由页面按角色与归属画。
     // 形状与题库一致 —— 内容型入口，不做角色分叉。
     { title: "复习资料", url: "/materials", icon: FolderDownIcon },
+    // AI 配置：全站 AI 功能共用的密钥/模型入口。只对教师/管理员可见；
+    // 学生端不需要密钥（学习路径是确定性算法，不调用大模型）。
+    ...(isTeacher || isSchoolAdmin || isAdmin
+      ? [
+          {
+            title: "AI 配置",
+            url: "/settings/ai",
+            icon: Settings2Icon,
+            tooltip: "AI 配置（密钥只存本机浏览器）",
+          },
+        ]
+      : []),
     // 学生名册。放在「导航」而不是「管理台」：教师不是管理员，但他也要看本专业的学生。
     // 标签按角色变 —— 同一条路由三种口径，服务端各自筛各自的（见 lib/students.js）。
     ...(isTeacher || isSchoolAdmin || isAdmin
@@ -122,6 +135,12 @@ function useNavItems(
       url: "/showcase/architecture",
       icon: WorkflowIcon,
       tooltip: "软件架构与人员层级管理结构流程图",
+    },
+    {
+      title: "AI 算法说明",
+      url: "/showcase/algorithms",
+      icon: SparklesIcon,
+      tooltip: "LLM / 模拟退火 / BKT / FSRS / CTT / 查重 / 画像六轴",
     },
     {
       title: "软件架构及人员管理动画",

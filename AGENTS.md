@@ -248,31 +248,39 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 - 2026-10-21 曾尝试把 `download.myquiz.cn` 绑到大陆 bucket，因备案问题未成功；
   Cloudflare 上还留着 TXT `_dnsauth.download` 与 CNAME `download`，不再使用时可以删掉。
 
-## 试卷改版后的成绩：旧交卷按新版答案重算（0115，2026-10-29）
+## 试卷改版后的成绩：旧版成绩不迁移、不重算（2026-11-02 口径反转）
 
-用户报「24年单招发布第三版后，之前的考试成绩不在了」。核实：v2 有 **119 场官方已出分**，
-v3 是 0 场 —— 成绩没丢，是 0077/0078 只认 `current_published_version_id`。
+2026-10-29 曾按「发布新版时把旧交卷迁到新版、按新版答案重算」实现（0115 触发器）。
+**2026-11-02 用户改口**：发布新版大多是某道题有问题，**不应该影响旧版的考试成绩**。
 
-产品口径（用户原话）：**"改一版都是小范围题目的改，所以成绩请按照改版后的答案重新计算分数
-排名即可"** —— 不分成两张榜，而是把旧交卷**迁到新版**、用**新版答案**重算。
+现在的口径：
 
-- 入口只有一个：`papers.current_published_version_id` 上的 **AFTER UPDATE 触发器**
-  → `rescore_attempts_for_version(paper_id, new_version_id)`。用触发器而不是在
-  `review_decide_paper` 里加一行：那是 100 行审批逻辑，重抄只为加一行调用不划算，
-  抄错一个分支就是审批故障。它能成立的前提是**所有读路径都只看当前入库版本**
-  （0077/0078/0087/0088 本来就是这样），所以那些函数一行都没改。
-- 映射**按 question_id，不按 seq**：同一道题改内容是同一道题；整道题被换掉时旧答案
-  不会被错安到新题上。线上核过没有任何一份卷面里同一道题出现两次。
-- **题没改就原样搬**（同 question_version_id + 同 score + 同 score_units）：人工判分的
-  `manual_score/comment/scored_by` 一起搬，不让教师白判一遍；只有改过的题才用
-  `grade_exam_units(新版 content)` 重判（人工题回到 pending）。别在这里另写一套判分逻辑。
-- **官方成绩去重保留"最新版本"那一条**，不是最早一次：合并前他看到的就是最新版的成绩
-  （线上 唐涛 v1 待阅卷 0 分 + v2 已出分 6 分，保留最早会让他从榜上消失）。其余降为自主练习，
-  否则搬进同一版会撞 `uq_exam_official`。
-- **进行中的考试一律 `abandoned`**：卷面已经不是他打开时那一份了。
-- 幂等：已经在目标版本上的场次不会被再处理；补跑用
-  `select public.rescore_attempts_for_version(...)`。
-- 迁移里带**回填**：把线上已经落在旧版本上的成绩按同一口径迁过来
-  （2026-10-29 只有「24年单招」命中：v2 的 130 场 → v3，榜仍是 119 人、平均 96.73、最高 158）。
-- 0115 草稿期试过"一版一张榜 + 版本切换器"（`resolve_paper_version` + `p_version_id`），
-  **已废弃并删除**：既然要重算，就没有第二张榜可看，别再往那个方向改。
+- **发布触发器已停用**（`trg_papers_rescore_on_publish`，`tgenabled='D'`）。
+  发布新版只新增版本，不迁移、不重算旧场次；旧场次留在原版本，成绩原样保留。
+- **成绩榜跨版本合并，每人取最新一次官方成绩**（0118 的 `paper_leaderboard`）。
+  旧版成绩保留；新版考过就以新版为准。`class_exam_results` 同样每人每卷取最新一次。
+- **试题分析仍只绑定当前入库版本**（逐题分析必须对应一份卷面），旧版场次只在
+  试题分析页签计为 `other_version_skipped`。
+- `rescore_attempts_for_version` 保留只为手工修复，**不要再挂回发布触发器**。
+- 0115 草稿期试过「一版一张榜 + 版本切换器」（`resolve_paper_version` + `p_version_id`），
+  已废弃；现在不需要版本切换，也不按版本分榜。
+
+⚠ **24年单招的数据事故**：0115 第一版草稿（先 `delete from exam_answers` 再读旧答案）
+在 2026-10-29 13:14 UTC 左右把 120 场官方成绩的 7080 条作答清空并重判成 0 分；
+autovacuum 在 13:15 UTC 回收了旧行，heap 里已无法恢复。只能从 Supabase 备份/PITR
+恢复到 2026-10-29 13:14 UTC 之前，再按 `attempt_id` 回填 `exam_answers`/`exam_attempts`。
+这次事故与 2026-11-02 的口径反转无关；反转只是为了不再发生同类迁移。
+
+## 班级 AI 报告用学生真名（2026-11-03 口径反转）
+
+2026-10-24 的初版把错答名单做成「学生N」编号（0088/0113 的隐私口径）。
+**2026-11-03 用户明确改口**：班级 AI 报告不匿名，**直接用学生真名**。
+
+- 迁移 `0127_class_ai_real_names.sql` 只改 `_class_ai_data` 的输出：
+  `students[].label`、`options[].students`、`wrong[]`、`samples[].student`、
+  `sub_samples[].student` 全部换成 `profiles.name`。
+- **内部 join 仍用「学生N」label**（同名学生不会互相串数据），只有发给模型/页面的
+  JSON 换真名；改名时别把内部 label 一起改掉。
+- 提示词（`lib/ai-report-prompt.js`）要求模型**只使用数据里出现的姓名**，不要猜、不要编造；
+  改完跑 `npm run test:ai-report`。`lib/lesson-plan-prompt.js` 允许沿用报告里的姓名。
+- 旧报告会因 payload 指纹变化自动变 stale（页面提示重新生成），这是预期行为。

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { QuestionView } from "@/components/questions/question-view"
+import { AiGradeSuggest } from "@/components/papers/ai-grade-suggest"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SkeletonRows } from "@/components/ui/skeletons"
 import { fmtDateTime } from "@/lib/format"
@@ -209,6 +210,18 @@ function GradeRow({ item, record, onGraded }) {
               className="mt-2 h-8"
             />
           )}
+          {isPending && (
+            <AiGradeSuggest
+              item={item}
+              record={record}
+              labels={unitLabelList}
+              onApply={(nextUnits, nextComment) => {
+                // 只填输入框；保存仍由教师点下面的「保存本题给分」。
+                setUnits(nextUnits)
+                if (nextComment) setComment(nextComment)
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -219,6 +232,7 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
   const supabase = createClient()
   const [queue, setQueue] = useState(initialQueue)
   const [onlyPending, setOnlyPending] = useState(true)
+  const [onlyPendingRows, setOnlyPendingRows] = useState(true)
   const [current, setCurrent] = useState(null) // 阅卷详情 {attempt, paper, answers}
   const [loading, setLoading] = useState(false)
 
@@ -264,6 +278,18 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
   }, [current])
 
   const pendingLeft = rows.filter((r) => r.record?.grading === "pending").length
+  const pendingUnits = rows
+    .filter((r) => r.record?.grading === "pending")
+    .reduce((sum, r) => sum + (r.item.score_units?.length ?? 1), 0)
+  const reviewRows = rows.filter(
+    (r) =>
+      r.record?.grading === "pending" ||
+      r.record?.grading === "manual" ||
+      r.item.qtype === "short_answer"
+  )
+  const visibleReviewRows = onlyPendingRows
+    ? reviewRows.filter((r) => r.record?.grading === "pending")
+    : reviewRows
 
   async function finish() {
     const { data, error } = await supabase.rpc("finish_exam_grading", { p_attempt_id: current.attempt.id })
@@ -295,7 +321,7 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
             onChange={(e) => setOnlyPending(e.target.checked)}
             className="size-3.5"
           />
-          只看还没判完的
+          只看待判
         </label>
 
         <div className="space-y-1.5">
@@ -358,12 +384,24 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
                 <p className="mt-0.5 text-sm">
                   当前得分 <b className="tabular-nums">{round2(current.attempt.total_score)}</b> /{" "}
                   {round2(current.attempt.full_score)} 分
-                  {pendingLeft > 0 && (
-                    <span className="ml-2 text-amber-600">还有 {pendingLeft} 题待判</span>
-                  )}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  已判 {rows.length - pendingLeft} / 共 {rows.length} 题
+                  {pendingLeft > 0
+                    ? ` · 还剩 ${pendingLeft} 题 / ${pendingUnits} 个给分点待判`
+                    : " · 全部判完"}
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={onlyPendingRows}
+                    onChange={(e) => setOnlyPendingRows(e.target.checked)}
+                    className="size-3.5"
+                  />
+                  只看待判
+                </label>
                 <Button variant="outline" size="sm" render={<Link href={`/papers/${paperId}`} />} nativeButton={false}>
                   <ArrowLeftIcon className="size-4" /> 试卷详情
                 </Button>
@@ -374,11 +412,9 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
               </div>
             </div>
 
-            {/* 主观题（简答，或含简答子题的复合题）的计分点在服务端就是 pending，
-                客观题在这里只是复核——教师可以推翻自动判分 */}
-            {rows
-              .filter((r) => r.record?.grading === "pending" || r.item.qtype === "short_answer" || r.record?.grading === "manual")
-              .map((r) => (
+            {/* 人工题：简答、填空、综合（含其客观子题）在服务端就是 pending；
+                客观选择/判断仍自动判，折叠在下面供复核 */}
+            {visibleReviewRows.map((r) => (
                 <GradeRow
                   key={r.item.id}
                   item={r.item}
@@ -392,7 +428,7 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
 
             <details className="rounded-xl border p-4">
               <summary className="cursor-pointer text-sm font-medium">
-                客观题自动判分（{rows.filter((r) => r.record?.grading === "auto").length} 题，点开复核）
+                客观题自动判分（选择/判断，{rows.filter((r) => r.record?.grading === "auto").length} 题，点开复核）
               </summary>
               <div className="mt-3 space-y-4">
                 {rows
