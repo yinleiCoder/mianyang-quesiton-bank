@@ -37,6 +37,7 @@ import {
   Building2Icon,
   ChevronsUpDownIcon,
   ClapperboardIcon,
+  ClipboardCheckIcon,
   FileTextIcon,
   FileStackIcon,
   FileUpIcon,
@@ -144,6 +145,12 @@ function useNavItems(
     // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
     ...(isTeacher
       ? [{ title: "我的题目", url: "/questions", icon: FileTextIcon }]
+      : []),
+    // 阅卷队列（2026-11-05）：入口以前只藏在「试卷详情 → 阅卷」里，教师得先知道
+    // 是哪份卷子；学生一交卷也没有任何地方汇总"还有几场没批"。
+    // 权限由 list_my_grading_queue 里的 is_paper_grader 收口，这里只按角色给入口。
+    ...(isTeacher || isSchoolAdmin || isAdmin
+      ? [{ title: "阅卷", url: "/grading", icon: ClipboardCheckIcon }]
       : []),
     // 角标＝分给我待处理的任务数（Gmail 式），处理完 router.refresh() 会重算
     ...(isAdmin || isSchoolAdmin || isApprover

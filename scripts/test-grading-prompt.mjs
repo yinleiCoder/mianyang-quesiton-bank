@@ -175,6 +175,92 @@ ok("综合题按子题/空对齐 score_units", () => {
   assert.equal(specs[3].mode, "partial")
 })
 
+// 2026-11-05 线上事故：整题一个计分点的综合题（卷面 20 分一道），
+// 既不是"每个子题一个计分点"也不是"每个空一个计分点"，以前直接落到 fallback，
+// student 是空串 → AI 判「未作答」→ 建议 0 分。学生明明写了。
+const groupItem = {
+  qtype: "composite",
+  score: 20,
+  score_units: [20],
+  content: {
+    stem: [{ t: "text", text: "根据材料作答。" }],
+    sub: [
+      {
+        type: "multiple_choice",
+        stem: [{ t: "text", text: "（1）下列正确的是" }],
+        options: [
+          { key: "A", label: [{ t: "text", text: "甲" }] },
+          { key: "B", label: [{ t: "text", text: "乙" }] },
+        ],
+        answer: { type: "choice", keys: ["A", "B"] },
+      },
+      {
+        type: "fill_blank",
+        stem: [{ t: "text", text: "（2）公式 ______" }],
+        answer: { type: "blank", values: ["C2:C43"] },
+      },
+    ],
+  },
+}
+
+ok("综合题整题一个计分点：学生的作答必须带给模型", () => {
+  const record = {
+    answer: {
+      type: "composite",
+      subs: [
+        { type: "choice", keys: ["A", "B"] },
+        { type: "blank", values: ["C2:C43"] },
+      ],
+    },
+  }
+  const specs = buildUnitSpecs(groupItem, record, ["本题"])
+  assert.equal(specs.length, 1)
+  assert.equal(specs[0].mode, "partial")
+  assert.equal(specs[0].max, 20)
+  assert.equal(specs[0].blank, false)
+  assert.ok(specs[0].student.includes("A、B"), `学生选择丢了：${specs[0].student}`)
+  assert.ok(specs[0].student.includes("C2:C43"), `学生填空丢了：${specs[0].student}`)
+  assert.ok(specs[0].reference.some((line) => line.includes("C2:C43")))
+})
+
+ok("综合题整题一个计分点：全空才算未作答", () => {
+  const specs = buildUnitSpecs(groupItem, { answer: { type: "composite", subs: [] } }, ["本题"])
+  assert.equal(specs.length, 1)
+  assert.equal(specs[0].student, "")
+  assert.equal(specs[0].blank, true)
+})
+
+ok("计分点排布对不上时，fallback 也保留学生作答", () => {
+  // 3 个子题、2 个计分点：两种对齐都不成立
+  const item = {
+    qtype: "composite",
+    score_units: [10, 10],
+    content: {
+      stem: [],
+      sub: [
+        { type: "short_answer", stem: [{ t: "text", text: "一" }], answer: { type: "text", samples: ["甲"] } },
+        { type: "short_answer", stem: [{ t: "text", text: "二" }], answer: { type: "text", samples: ["乙"] } },
+        { type: "short_answer", stem: [{ t: "text", text: "三" }], answer: { type: "text", samples: ["丙"] } },
+      ],
+    },
+  }
+  const record = {
+    answer: {
+      type: "composite",
+      subs: [
+        { type: "text", text: "我的第一段" },
+        { type: "text", text: "我的第二段" },
+        { type: "text", text: "" },
+      ],
+    },
+  }
+  const specs = buildUnitSpecs(item, record, ["一", "二"])
+  assert.equal(specs.length, 2)
+  assert.equal(specs[0].kind, "unknown")
+  assert.ok(specs[0].student.includes("我的第一段"))
+  assert.equal(specs[0].blank, false)
+})
+
 ok("unit specs：binary 半分与空白非零被拒", () => {
   const specs = [
     { index: 0, mode: "binary", max: 2, blank: false },
