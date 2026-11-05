@@ -24,6 +24,7 @@
     "test:audit": "node --import ./scripts/alias-loader.mjs scripts/test-question-audit.mjs && node --import ./scripts/alias-loader.mjs scripts/test-question-audit-prompt.mjs",
     "test:lesson": "node --import ./scripts/alias-loader.mjs scripts/test-lesson-plan.mjs",
     "test:grading": "node --import ./scripts/alias-loader.mjs scripts/test-grading-prompt.mjs",
+    "test:showcase": "node --import ./scripts/alias-loader.mjs scripts/test-showcase-scheduler.mjs",
     "backtest:practice": "node --import ./scripts/alias-loader.mjs scripts/backtest-practice-scheduler.mjs"
   },
   "dependencies": {

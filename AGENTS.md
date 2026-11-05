@@ -284,3 +284,39 @@ autovacuum 在 13:15 UTC 回收了旧行，heap 里已无法恢复。只能从 S
 - 提示词（`lib/ai-report-prompt.js`）要求模型**只使用数据里出现的姓名**，不要猜、不要编造；
   改完跑 `npm run test:ai-report`。`lib/lesson-plan-prompt.js` 允许沿用报告里的姓名。
 - 旧报告会因 payload 指纹变化自动变 stale（页面提示重新生成），这是预期行为。
+
+## 展示页与「软件架构讲解」分组（2026-11-05）
+
+侧栏有三个分组：**导航 / 管理台 / 软件架构讲解**。最后一个只放只读展示页，
+**不做角色分叉**（学生和教师也要看得见）—— 别把它并进 `管理台` 那个
+`isAdmin || isSchoolAdmin` 的闸门里。
+
+- 五项：`/showcase/architecture`、`/showcase/animation`、`/showcase/scheduler`（科学抽题算法动画）、
+  `/showcase/promo`、`/showcase/algorithms`。
+- 标签三处同源：`components/app-sidebar.jsx` 的 `useNavItems`、`lib/breadcrumbs.js` 的
+  `SHOWCASE_PAGES`、各页 `PageHeader`。改一处要改另外两处（breadcrumbs 漏登记会让整条空白）。
+- Remotion 只在浏览器里跑（`remotion` + `@remotion/player`，**没有** cli/bundler/renderer）：
+  组合 → `*-video.jsx`，播放器 → `"use client"` 的 `*-player.jsx`，
+  再由 `*-player-lazy.jsx` 以 `dynamic(ssr:false)` 包一层。Server Component 不能直接 import remotion。
+- `components/showcase/primitives.jsx` 是两套动画共用的舞台原语（StageGrid / SceneShell /
+  EnterCard / Chip / NodeCard）；动画专用原语放在各自目录下。
+- **深链**：`/showcase/scheduler?scene=<id>`，章节 id 见 `lib/showcase-scheduler.js` 的
+  `SCHEDULER_SCENES`。Flutter 首页四张原理卡片（`science_note.dart`）点的就是它；
+  `proxy.js` 必须把查询串一起塞进登录回跳的 `next`，否则登录后落不到章节。
+- 动画里的数字**不是编的**：`lib/showcase-scheduler.js` 用 `lib/practice-scheduler-reference.js`
+  的 FSRS-6 / BKT 公式现算。改算法或改文案跑 `npm run test:showcase`。
+
+顺带：`lib/algorithm-notes.js` 的 BKT / FSRS 两条与 `lib/showcase-scheduler-notes.js`
+是**互相引用**关系，不要把同一段解释复制两份。
+
+## OSS 流量与 CDN（2026-11-05：只出方案，未改代码）
+
+方案与实测数据在 `docs/oss-cdn-optimization.md`。三条最容易复发的：
+
+- **图片压缩早就做了**（`lib/oss-url.js` 的 `x-oss-process`），别再重复优化；
+  真正的浪费是**对象没有 `Cache-Control`**，回访反复回源。
+- **`myquiz.cn` 没有有效 ICP 备案**，所以阿里云 CDN 与 OSS 自定义域名都开不了。
+  现在能用是因为网页在 Vercel 香港、媒体走 OSS 默认域名（都免备案）。
+- **别把 OSS 挂 Cloudflare**：大陆会被调度到境外节点，且 `supabase-proxy/README.md` 已写明。
+- 切 CDN 时：媒体地址只改 `NEXT_PUBLIC_OSS_PUBLIC_HOST`；
+  **签名下载继续签桶自己的域名**（`app/api/materials/download/route.js:63-64`）。

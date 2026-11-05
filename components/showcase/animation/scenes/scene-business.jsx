@@ -7,7 +7,7 @@ import {
   NodeCard,
   SceneShell,
   STAGE,
-} from "../primitives"
+} from "@/components/showcase/primitives"
 
 const CENTER = { x: 864, y: 350 }
 const RADIUS = 292

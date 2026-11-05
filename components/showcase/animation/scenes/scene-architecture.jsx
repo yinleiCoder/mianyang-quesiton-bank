@@ -9,7 +9,7 @@ import {
   NodeCard,
   SceneShell,
   STAGE,
-} from "../primitives"
+} from "@/components/showcase/primitives"
 
 const RIBBON = [
   { label: "用户端", tone: "sky" },

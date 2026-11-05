@@ -1,5 +1,6 @@
 // AI 算法说明（只读展示页）：给评委/教师看“每个分数/建议是怎么来的”。
 // 内容在 lib/algorithm-notes.js，与代码/迁移同源；改算法时同步改那里。
+import Link from "next/link"
 import { requireUser } from "@/lib/auth"
 import { ALGORITHM_NOTES } from "@/lib/algorithm-notes"
 import { PageHeader } from "@/components/page-header"
@@ -17,6 +18,17 @@ export default async function AlgorithmsPage() {
         title="AI 算法说明"
         description="只读展示：LLM 结构化输出、模拟退火组卷、BKT/FSRS/CTT、pg_trgm 查重、Beta 收缩与画像六轴。"
       />
+
+      <p className="text-sm text-muted-foreground">
+        这里只写口径与边界；BKT 与 FSRS 的动画演示与详细解释在{" "}
+        <Link
+          href="/showcase/scheduler"
+          className="text-primary underline underline-offset-4"
+        >
+          科学抽题算法动画
+        </Link>
+        。
+      </p>
 
       <div className="grid gap-3 lg:grid-cols-2">
         {ALGORITHM_NOTES.map((note) => (

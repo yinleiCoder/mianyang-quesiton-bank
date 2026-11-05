@@ -4,7 +4,7 @@
 // 这是与 2026-10-09 撤掉的「教师写动画」完全不同的功能。
 import { AbsoluteFill, Sequence } from "remotion"
 import { SCENES, SHOWCASE_FONT } from "@/lib/showcase-animation"
-import { StageGrid } from "./primitives"
+import { StageGrid } from "@/components/showcase/primitives"
 import { SceneApproval } from "./scenes/scene-approval"
 import { SceneArchitecture } from "./scenes/scene-architecture"
 import { SceneBusiness } from "./scenes/scene-business"

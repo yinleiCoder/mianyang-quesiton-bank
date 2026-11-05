@@ -9,7 +9,7 @@ import {
   loopT,
   SceneShell,
   STAGE,
-} from "../primitives"
+} from "@/components/showcase/primitives"
 
 const CARD_W = 320
 const CARD_GAP = 24

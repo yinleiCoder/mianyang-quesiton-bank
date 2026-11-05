@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  BrainCircuitIcon,
   Building2Icon,
   ChevronsUpDownIcon,
   ClapperboardIcon,
@@ -73,19 +74,17 @@ function useNavItems(
   openReports = 0,
   openPaperTasks = 0,
 ) {
-  // 主菜单随里程碑追加：M4 审批收件箱（组长/专家/管理员见）、M5 全市题库
-  // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
+  // 侧栏共五组（自上而下）：导航 / AI与科技教育 / 管理台 / 我的工作 / 软件架构讲解。
+  // 分组口径（2026-11-05 用户定）：
+  //   导航      —— 人人都用的内容入口（题库、组卷库、资料）
+  //   AI与科技教育 —— AI 相关配置与入口，放在管理台上方
+  //   管理台    —— 只有管理员/学校管理员看得见，所以这一组的**存在本身**就是角色闸门
+  //   我的工作  —— 我自己的题目与待办（教师/审批人/管理员各一部分）
+  //   软件架构讲解 —— 只读展示页，不做角色分叉
   const main = [
     { title: "工作台", url: "/dashboard", icon: LayoutDashboardIcon },
-    ...(isTeacher
-      ? [
-          { title: "我的题目", url: "/questions", icon: FileTextIcon },
-          // AI 解析也是教师专属：它会生成调用者名下的草稿
-          { title: "AI智能解析题库资料", url: "/questions/import", icon: FileUpIcon },
-        ]
-      : []),
     // 题目反馈（学生纠错）的处理入口。
-    // **不能塞进上面那个 isTeacher 块** —— 学校管理员未必是教师身份，
+    // **不能塞进 isTeacher 判断** —— 学校管理员未必是教师身份，
     // 但作者离职后正是他们兜底处理，漏掉就等于那条链路没人管。
     ...(isTeacher || isSchoolAdmin || isAdmin
       ? [
@@ -105,6 +104,15 @@ function useNavItems(
     // 复习资料：全市共享，所有登录用户都能看；上传/删除按钮由页面按角色与归属画。
     // 形状与题库一致 —— 内容型入口，不做角色分叉。
     { title: "复习资料", url: "/materials", icon: FolderDownIcon },
+    // 学生名册：2026-11-05 起管理台角色（管理员/学校管理员）的那一份挪进了「管理台」分组；
+    // 普通教师没有管理台，这里保留「我的学生」，否则他就失去了看本专业学生的入口。
+    ...(isTeacher && !isAdmin && !isSchoolAdmin
+      ? [{ title: "我的学生", url: "/students", icon: GraduationCapIcon }]
+      : []),
+  ];
+
+  // AI 与科技教育：排在「管理台」上方（2026-11-05 用户定的分组）。
+  const ai = [
     // AI 配置：全站 AI 功能共用的密钥/模型入口。只对教师/管理员可见；
     // 学生端不需要密钥（学习路径是确定性算法，不调用大模型）。
     ...(isTeacher || isSchoolAdmin || isAdmin
@@ -117,43 +125,6 @@ function useNavItems(
           },
         ]
       : []),
-    // 学生名册。放在「导航」而不是「管理台」：教师不是管理员，但他也要看本专业的学生。
-    // 标签按角色变 —— 同一条路由三种口径，服务端各自筛各自的（见 lib/students.js）。
-    ...(isTeacher || isSchoolAdmin || isAdmin
-      ? [
-          {
-            title: isAdmin ? "学生名册" : isSchoolAdmin ? "本校学生" : "我的学生",
-            url: "/students",
-            icon: GraduationCapIcon,
-          },
-        ]
-      : []),
-    // 系统展示：对全部登录用户可见，只读、不读业务数据。长标题在侧栏会被 truncate，
-    // 由 NavRow 的 title 属性与 tooltip 兜底（收折成图标栏时显示悬浮提示）。
-    {
-      title: "软件架构与人员层级管理结构流程图",
-      url: "/showcase/architecture",
-      icon: WorkflowIcon,
-      tooltip: "软件架构与人员层级管理结构流程图",
-    },
-    {
-      title: "AI 算法说明",
-      url: "/showcase/algorithms",
-      icon: SparklesIcon,
-      tooltip: "LLM / 模拟退火 / BKT / FSRS / CTT / 查重 / 画像六轴",
-    },
-    {
-      title: "软件架构及人员管理动画",
-      url: "/showcase/animation",
-      icon: ClapperboardIcon,
-      tooltip: "软件架构及人员管理动画",
-    },
-    {
-      title: "软件宣传展示",
-      url: "/showcase/promo",
-      icon: MegaphoneIcon,
-      tooltip: "软件宣传展示",
-    },
     // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
     // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
     {
@@ -162,16 +133,37 @@ function useNavItems(
       icon: SparklesIcon,
       external: true,
     },
+    // AI 解析是教师专属：它会生成调用者名下的草稿
+    ...(isTeacher
+      ? [{ title: "AI智能解析题库资料", url: "/questions/import", icon: FileUpIcon }]
+      : []),
   ];
-  if (isAdmin || isSchoolAdmin || isApprover) {
+
+  // 我的工作：排在「管理台」下方（2026-11-05 用户定的分组）。
+  const work = [
+    // 「我的题目」为教师专属（学生与待审核教师无出题权限，不显示入口）
+    ...(isTeacher
+      ? [{ title: "我的题目", url: "/questions", icon: FileTextIcon }]
+      : []),
     // 角标＝分给我待处理的任务数（Gmail 式），处理完 router.refresh() 会重算
-    main.push({
-      title: "审批收件箱",
-      url: "/review",
-      icon: InboxIcon,
-      badge: openReviews,
-    });
-  }
+    ...(isAdmin || isSchoolAdmin || isApprover
+      ? [
+          {
+            title: "审批收件箱",
+            url: "/review",
+            icon: InboxIcon,
+            badge: openReviews,
+          },
+        ]
+      : []),
+    // 审批记录 / 审计日志：2026-11-05 从「管理台」挪到「我的工作」。
+    ...(isAdmin
+      ? [
+          { title: "审批记录", url: "/admin/reviews", icon: ListChecksIcon },
+          { title: "审计日志", url: "/admin/audit", icon: ScrollTextIcon },
+        ]
+      : []),
+  ];
   // 管理台：系统管理员全量；学校管理员仅「本校用户与任命」
   const admin = [];
   if (isAdmin || isSchoolAdmin) {
@@ -190,11 +182,16 @@ function useNavItems(
     });
     // 班级建设：与系统管理员的「科目树维护」（专业建设）并列，各管一层
     admin.push({ title: "班级管理", url: "/admin/classes", icon: UsersRoundIcon });
+    // 学生名册（2026-11-05 从「导航」挪进来）：能看见管理台的角色都带学生管理属性。
+    // 标签按角色变 —— 同一条路由两种口径，服务端各自筛各自的（见 lib/students.js）。
+    admin.push({
+      title: isAdmin ? "学生名册" : "本校学生",
+      url: "/students",
+      icon: GraduationCapIcon,
+    });
     if (isAdmin) {
       admin.push(
         { title: "知识点管理", url: "/admin/tags", icon: TagsIcon },
-        { title: "审批记录", url: "/admin/reviews", icon: ListChecksIcon },
-        { title: "审计日志", url: "/admin/audit", icon: ScrollTextIcon },
         // 未处理条数由布局（服务端）传入，处理完 router.refresh() 会重算
         {
           title: "意见反馈",
@@ -205,7 +202,43 @@ function useNavItems(
       );
     }
   }
-  return { main, admin };
+  // 软件架构讲解：与「管理台」并列的**第三组**，但**不做角色分叉** ——
+  // 这些页面全是只读展示、不读业务数据，学生和教师也需要看得到。
+  // 长标题在侧栏会被 truncate，由 NavRow 的 title 属性与 tooltip 兜底。
+  const showcase = [
+    {
+      title: "软件宣传展示",
+      url: "/showcase/promo",
+      icon: MegaphoneIcon,
+      tooltip: "软件宣传展示",
+    },
+    {
+      title: "软件架构与人员层级管理结构流程图",
+      url: "/showcase/architecture",
+      icon: WorkflowIcon,
+      tooltip: "软件架构与人员层级管理结构流程图",
+    },
+    {
+      title: "软件架构及人员管理动画",
+      url: "/showcase/animation",
+      icon: ClapperboardIcon,
+      tooltip: "软件架构及人员管理动画",
+    },
+    {
+      title: "AI 算法说明",
+      url: "/showcase/algorithms",
+      icon: SparklesIcon,
+      tooltip: "LLM / 模拟退火 / BKT / FSRS / CTT / 查重 / 画像六轴",
+    },
+    {
+      title: "科学抽题算法动画",
+      url: "/showcase/scheduler",
+      icon: BrainCircuitIcon,
+      tooltip: "科学抽题算法动画（FSRS-6 + BKT）",
+    },
+  ];
+
+  return { main, ai, admin, work, showcase };
 }
 
 function NavRow({ item, pathname }) {
@@ -252,7 +285,13 @@ export function AppSidebar({
   const pathname = usePathname();
   const { isMobile } = useSidebar();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const { main: navItems, admin: adminItems } = useNavItems(
+  const {
+    main: navItems,
+    ai: aiItems,
+    admin: adminItems,
+    work: workItems,
+    showcase: showcaseItems,
+  } = useNavItems(
     isAdmin,
     isSchoolAdmin,
     isApprover,
@@ -311,11 +350,41 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroup>
         )}
+        {aiItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>AI与科技教育</SidebarGroupLabel>
+            <SidebarMenu>
+              {aiItems.map((item) => (
+                <NavRow key={item.url} item={item} pathname={pathname} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
         {adminItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>管理台</SidebarGroupLabel>
             <SidebarMenu>
               {adminItems.map((item) => (
+                <NavRow key={item.url} item={item} pathname={pathname} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+        {workItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>我的工作</SidebarGroupLabel>
+            <SidebarMenu>
+              {workItems.map((item) => (
+                <NavRow key={item.url} item={item} pathname={pathname} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+        {showcaseItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>软件架构讲解</SidebarGroupLabel>
+            <SidebarMenu>
+              {showcaseItems.map((item) => (
                 <NavRow key={item.url} item={item} pathname={pathname} />
               ))}
             </SidebarMenu>

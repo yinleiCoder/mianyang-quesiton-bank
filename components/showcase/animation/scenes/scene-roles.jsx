@@ -10,7 +10,7 @@ import {
   NodeCard,
   SceneShell,
   STAGE,
-} from "../primitives"
+} from "@/components/showcase/primitives"
 
 const SLOTS = {
   system_admin: { left: 260, top: 0, width: 300 },

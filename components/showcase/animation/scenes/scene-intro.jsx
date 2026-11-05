@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion"
-import { Chip, STAGE } from "../primitives"
+import { Chip, STAGE } from "@/components/showcase/primitives"
 import { toneVideo } from "@/lib/showcase-palette"
 
 export function SceneIntro({ duration }) {

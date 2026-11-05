@@ -8,7 +8,7 @@ import {
   loopT,
   SceneShell,
   STAGE,
-} from "../primitives"
+} from "@/components/showcase/primitives"
 
 const STEPS = [
   { id: "teacher", left: 40, icon: "teacher", title: "教师提交", subtitle: "题目 / 试卷版本", tone: "sky", status: "提交" },

@@ -1,6 +1,6 @@
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion"
 import { toneVideo } from "@/lib/showcase-palette"
-import { Icon, STAGE } from "../primitives"
+import { Icon, STAGE } from "@/components/showcase/primitives"
 
 const POINTS = [
   { icon: "activity", title: "架构清晰", tone: "violet" },

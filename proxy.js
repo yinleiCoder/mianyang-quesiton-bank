@@ -44,7 +44,9 @@ export async function proxy(request) {
   }
   if (!user && isProtected) {
     const url = new URL("/login", request.url)
-    url.searchParams.set("next", pathname)
+    // 查询串要一起带上：客户端用 /showcase/scheduler?scene=bkt 深链到某一章，
+    // 登录后必须回到同一章，否则深链等于没用（safeNext 允许带查询串）。
+    url.searchParams.set("next", `${pathname}${request.nextUrl.search}`)
     return NextResponse.redirect(url)
   }
   return getResponse() ?? NextResponse.next()
