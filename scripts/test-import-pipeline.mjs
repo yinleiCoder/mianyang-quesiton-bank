@@ -3,6 +3,15 @@
 // 这个模块是"模型输出不可信"的第一道闸门，改动 normalize* 后请务必跑一遍。
 import { normalizePage, normalizeQuestion, draftIssues, costOf } from "@/lib/import-pipeline"
 import { salvageJson } from "@/lib/deepseek"
+import {
+  normalizeAnswerKey,
+  mergeAnswerEntries,
+  answersEqual,
+  normalizeQno,
+  answerTextOf,
+} from "@/lib/import-answer-key"
+import { planImageTiles } from "@/lib/image-client"
+import { buildPageParts } from "@/lib/import-prompts"
 
 let pass = 0
 let fail = 0
@@ -354,6 +363,219 @@ console.log("\n【18】同一材料下的不同复合题不能被去重丢掉")
   ok(items.length === 2, "两道不同小问的复合题都保留", items.length)
   const same = normalizePage({ questions: [q(1), q(1)] })
   ok(same.items.length === 1 && same.items[0].flags.includes("dup_in_job"), "完全相同的复合题仍然去重")
+}
+
+console.log("\n【19】答案键规范化（0146）：三种输入形状 / 丢弃 / 去重 / 上限")
+{
+  const a = normalizeAnswerKey({
+    answers: [
+      { qno: "1", answer_text: "A", analysis: "因为甲" },
+      { qno: " ２ ", answer_text: "B" },
+      { qno: "", answer_text: "C" },
+      { qno: "3" },
+    ],
+  })
+  ok(a.entries.length === 2, "丢弃没有题号/没有答案的条目", a.entries)
+  ok(a.dropped === 2, "被丢的条数要计数", a.dropped)
+  ok(a.entries[0].analysis === "因为甲", "解析保留")
+
+  // 模型也会直接把题号当键
+  const b = normalizeAnswerKey({ answers: { 12: "A", 13: { answer_text: "BC", section: "二、多选" } } })
+  ok(b.entries.length === 2 && b.entries[1].section === "二、多选", "对象形状 {题号:答案} 也认", b.entries)
+
+  // 同一题号（全角/半角）只留先出现的
+  const c = normalizeAnswerKey({ answers: [{ qno: "1", answer_text: "A" }, { qno: "１", answer_text: "B" }] })
+  ok(c.entries.length === 1 && c.entries[0].answer_text === "A", "同一题号只留先出现的")
+
+  const merged = mergeAnswerEntries(
+    [{ section: null, qno: "1", answer_text: "A" }],
+    [{ qno: "1", answer_text: "Z" }, { qno: "2", answer_text: "B" }]
+  )
+  ok(merged.length === 2 && merged[0].answer_text === "A", "合并时同样保留先出现的")
+
+  ok(normalizeQno(" 三．２（1） ") === "三.2(1)", "题号归一：全角数字/句点/括号/空白", normalizeQno(" 三．２（1） "))
+}
+
+console.log("\n【20】answer_source:\"key\" 只在真的有答案键时才认（0234 的降级闸门）")
+{
+  const base = {
+    qno: "1",
+    qtype: "single_choice",
+    stem: "下列正确的是",
+    options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }],
+    answer: { type: "choice", keys: ["A"] },
+    answer_source: "key",
+  }
+  const withKey = normalizeQuestion(base, { hasAnswerKey: true })
+  ok(withKey.flags.includes("answer_from_key"), "有答案键：标「答案来自答案区」")
+  ok(!withKey.flags.includes("ai_answer"), "不是 AI 推导，不该打 ai_answer")
+
+  const noKey = normalizeQuestion(base, { hasAnswerKey: false })
+  ok(!noKey.flags.includes("answer_from_key"), "没有答案键：这个字面量一律不认")
+}
+
+console.log("\n【21】另一份答案与冲突判定")
+{
+  const mk = (answer, alt, extra = {}) => ({
+    qno: "1",
+    qtype: "single_choice",
+    stem: "下列正确的是",
+    options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }],
+    answer,
+    answer_source: "key",
+    answer_alt: alt,
+    ...extra,
+  })
+
+  const diff = normalizeQuestion(
+    mk({ type: "choice", keys: ["A"] }, { type: "choice", keys: ["B"] }),
+    { hasAnswerKey: true }
+  )
+  ok(diff.answer_alt?.answer?.keys?.[0] === "B", "不一致时另一份被保留", diff.answer_alt)
+  ok(diff.flags.includes("answer_conflict"), "并标上冲突")
+
+  const same = normalizeQuestion(
+    mk({ type: "choice", keys: ["A"] }, { type: "choice", keys: ["A"] }),
+    { hasAnswerKey: true }
+  )
+  ok(same.answer_alt && !same.flags.includes("answer_conflict"), "一致时保留两份但不算冲突")
+
+  // 多选：顺序不同不算冲突
+  const multi = normalizeQuestion(
+    {
+      qno: "1",
+      qtype: "multiple_choice",
+      stem: "多选",
+      options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }, { key: "C", text: "丙" }],
+      answer: { type: "choice", keys: ["A", "C"] },
+      answer_source: "key",
+      answer_alt: { type: "choice", keys: ["C", "A"] },
+    },
+    { hasAnswerKey: true }
+  )
+  ok(!multi.flags.includes("answer_conflict"), "多选乱序不算冲突")
+
+  // 简答题：措辞差异是常态，保留但不标冲突（否则每条都要点一次，标记很快就没人看了）
+  const subj = normalizeQuestion(
+    {
+      qno: "1",
+      qtype: "short_answer",
+      stem: "谈谈你的理解",
+      answer: { type: "text", samples: ["甲说"] },
+      answer_source: "key",
+      answer_alt: { type: "text", samples: ["乙说"] },
+    },
+    { hasAnswerKey: true }
+  )
+  ok(subj.answer_alt && !subj.flags.includes("answer_conflict"), "简答题保留两份但不标冲突", subj.flags)
+
+  // 没有答案区时，answer_alt 一律不认
+  const off = normalizeQuestion(mk({ type: "choice", keys: ["A"] }, { type: "choice", keys: ["B"] }), {
+    hasAnswerKey: false,
+  })
+  ok(off.answer_alt === null, "没有答案区时不产生另一份答案")
+
+  // 复合题：按小问记
+  const comp = normalizeQuestion(
+    {
+      qtype: "composite",
+      stem: "阅读材料",
+      sub: [
+        {
+          type: "single_choice",
+          stem: "（1）",
+          options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }],
+          answer: { type: "choice", keys: ["A"] },
+          answer_source: "key",
+          answer_alt: { type: "choice", keys: ["B"] },
+        },
+      ],
+    },
+    { hasAnswerKey: true }
+  )
+  ok(comp.answer_alt?.subs?.length === 1, "复合题按小问记另一份答案", comp.answer_alt)
+  ok(comp.flags.includes("answer_conflict"), "小问不一致会把整题标成冲突")
+  ok(comp.answer_alt.subs[0].index === 0, "小问下标就是切换时定位用的下标")
+}
+
+console.log("\n【22】答案键注入：排在最前面（前缀缓存），没有键时输出不变")
+{
+  const without = buildPageParts({ pageNo: 3, text: "本页正文" })
+  ok(
+    !without.some((p) => p.type === "text" && p.text.includes("参考答案区")),
+    "没有答案键时不插入任何东西"
+  )
+  const withKey = buildPageParts({
+    pageNo: 3,
+    text: "本页正文",
+    answerKeyEntries: [{ section: "一、单选", qno: "1", answer_text: "A" }],
+  })
+  ok(
+    withKey[0].type === "text" && withKey[0].text.startsWith("【参考答案区】"),
+    "答案键在最前面——system + 答案键才是每页共享的缓存前缀",
+    withKey[0]
+  )
+  ok(
+    withKey.some((p) => p.type === "text" && p.text.includes('answer_source 填 "key"')),
+    "尾部带上了答案键的规则"
+  )
+  ok(
+    !without.some((p) => p.type === "text" && p.text.includes('answer_source 填 "key"')),
+    "没有键时不会凭空多出一段规则"
+  )
+}
+
+console.log("\n【23】截断的答案数组也要能抢救（salvageJson 的数组名）")
+{
+  const broken =
+    '{"page_no":1,"answers":[{"qno":"1","answer_text":"A"},{"qno":"2","answer_text":"B"},{"qno":"3","ans'
+  const salvaged = salvageJson(broken, "answers")
+  ok(salvaged?.answers?.length === 2 && salvaged._salvaged, "按 answers 抢救出完整条目", salvaged)
+  const questions = salvageJson('{"questions":[{"qno":"1"}],"notes":')
+  ok(questions?.questions?.length === 1, "默认仍按 questions 抢救（老路径不受影响）")
+}
+
+console.log("\n【24】图片切图几何：不放大、片数 ≤8、每片不超像素上限")
+{
+  const tiny = planImageTiles(100, 100)
+  ok(tiny.rows === 1 && tiny.width === 100, "小图不放大、只切一片", tiny)
+
+  for (const [w, h] of [[3024, 4032], [8000, 6000], [12000, 500], [2000, 20000]]) {
+    const p = planImageTiles(w, h)
+    ok(p.rows <= 8, `${w}×${h}：片数 ≤8`, p)
+    ok(p.width * p.tileHeight <= 1_600_000 * 1.02, `${w}×${h}：每片像素不超上限`, {
+      tile: p.width * p.tileHeight,
+    })
+    ok(p.width <= 1489, `${w}×${h}：宽度归一到 A4@180dpi`, p.width)
+  }
+}
+
+console.log("\n【25】答案摘要与比较")
+{
+  ok(answersEqual({ type: "choice", keys: ["A", "C"] }, { type: "choice", keys: ["C", "A"] }), "多选顺序无关")
+  ok(!answersEqual({ type: "blank", values: ["甲", "乙"] }, { type: "blank", values: ["乙", "甲"] }), "填空顺序有关")
+  ok(
+    answerTextOf({ sub: [{ answer: { type: "choice", keys: ["A"] } }, { answer: { type: "tf", value: true } }] }) ===
+      "1.A 2.对",
+    "复合题按小问编号拼答案（以前一律显示「未指定答案」）"
+  )
+  ok(answerTextOf({}) === null, "没有答案返回 null")
+}
+
+console.log("\n【26】去重之后另一份答案不能丢")
+{
+  const q = {
+    qno: "1",
+    qtype: "single_choice",
+    stem: "同一道题",
+    options: [{ key: "A", text: "甲" }, { key: "B", text: "乙" }],
+    answer: { type: "choice", keys: ["A"] },
+    answer_source: "key",
+    answer_alt: { type: "choice", keys: ["B"] },
+  }
+  const { items } = normalizePage({ questions: [q, { ...q }] }, { hasAnswerKey: true })
+  ok(items.length === 1 && items[0].flags.includes("dup_in_job"), "重复题被去掉")
+  ok(items[0].answer_alt?.answer?.keys?.[0] === "B", "保留那条带着另一份答案")
 }
 
 console.log(`

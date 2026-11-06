@@ -100,6 +100,15 @@ export function ImportItemEditor({ item, onClose, onSaved }) {
         </p>
       )}
 
+      {/* 0146：答案区与题内/推导不一致时，这里提醒一句「保存会作废另一份」——
+          想保留两份就对调，而不是重填 */}
+      {item.answer_alt && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          这道题有<strong>两份答案</strong>：表单里是当前采用的一份，另一份存在任务里。
+          <strong>在这里保存会作废另一份</strong>；想两边都留着对调，请回校对页用「改用这一份」。
+        </p>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">题型</Label>

@@ -12,8 +12,10 @@ import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { SOURCE_KINDS, jobStateChip } from "@/lib/import-jobs"
-import { trialParse } from "@/lib/import-parse-client"
+import { trialParse, parseAnswerSource } from "@/lib/import-parse-client"
+import { tilesFor, SourceFileError } from "@/lib/image-client"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
+import { ImageQueue } from "@/components/import/image-queue"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,6 +26,8 @@ import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { Loader2Icon, FileUpIcon, ScanTextIcon, ImageIcon } from "lucide-react"
 
 const ACCEPT = ".pdf,.docx,image/png,image/jpeg,image/webp"
+// 答案区的 Word 打包参数：答案是一行一题，按默认的「5 题一批」会被切成几十次调用
+export const ANSWER_DOCX_BATCHES = { perBatch: 40, maxChars: 8000 }
 const PROBE_SAMPLE = 12 // 抽样探测页数上限：几十页的卷子不必逐页探测，抽样足够判断版面
 
 // 探测一批页，返回每页的 { pageNo, hasText, hasImage, columns }
@@ -50,8 +54,12 @@ function samplePages(from, to, max) {
   )
 }
 
-export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
+export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, supportsAnswerZone = true }) {
   const [picked, setPicked] = useState(null) // { kind, name, pages, sizeMB, handle }
+  // 答案区（0146，可选）：形状与题目源完全一样，只是不参与题目页的解析
+  const [answerPicked, setAnswerPicked] = useState(null)
+  const [answerFrom, setAnswerFrom] = useState(1)
+  const [answerTo, setAnswerTo] = useState(1)
   const [probed, setProbed] = useState(null) // { samples, total, textPages, scanPages }
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(1)
@@ -69,62 +77,82 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
   const { hasKey, ready: keyReady, refresh: refreshKey } = useDeepSeekPrefs()
 
   const inputRef = useRef(null)
+  const answerInputRef = useRef(null)
+  // 两个上传区各自的内存持有者；fileRef.current 由它们拼出来：{...题目源, answer: 答案源|null}
+  const questionRef = useRef(null)
+  const answerRef = useRef(null)
+  // 上一次由文件名自动生成的标题：用户改过之后就不再覆盖它
+  const autoTitleRef = useRef("")
 
-  async function handleFiles(files) {
+  function syncFileRef() {
+    fileRef.current = questionRef.current
+      ? { ...questionRef.current, answer: answerRef.current ?? null }
+      : null
+  }
+
+  function commitSource(slot, src) {
+    if (slot === "answer") {
+      setAnswerPicked(src)
+      setAnswerFrom(1)
+      setAnswerTo(src.pages)
+      answerRef.current = src
+    } else {
+      setPicked(src)
+      setFrom(1)
+      setTo(src.pages)
+      // 多图时 name 是「a.jpg 等 3 张」，标题里把「等 N 张」与扩展名一起去掉。
+      // **只在用户没改过标题时跟着文件走**：追加一张照片就把手写的任务名冲掉，很恼人。
+      const nextTitle = src.name.replace(/\s*等 \d+ 张$/, "").replace(/\.(pdf|docx|png|jpe?g|webp)$/i, "")
+      setTitle((cur) => (!cur.trim() || cur === autoTitleRef.current ? nextTitle : cur))
+      autoTitleRef.current = nextTitle
+      questionRef.current = src
+    }
+    syncFileRef()
+  }
+
+  function clearSource(slot) {
+    if (slot === "answer") {
+      setAnswerPicked(null)
+      setAnswerFrom(1)
+      setAnswerTo(1)
+      answerRef.current = null
+    } else {
+      setPicked(null)
+      setFrom(1)
+      setTo(1)
+      setProbed(null)
+      setTrial(null)
+      questionRef.current = null
+    }
+    syncFileRef()
+  }
+
+  // 选文件（两个区共用）。**图片是追加**——一次只能选到几张，补拍的照片不该把前面的挤掉；
+  // PDF/Word 是替换（一个任务只放一份）。
+  async function applyFiles(slot, files) {
     const list = Array.from(files ?? [])
     if (list.length === 0) return
-    const first = list[0]
-    const name = first.name
+    const current = slot === "answer" ? answerRef.current : questionRef.current
     setTrial(null)
-    setProbed(null)
-    setBusy("open")
+    if (slot !== "answer") setProbed(null)
+    setBusy(slot === "answer" ? "answer" : "open")
     try {
-      if (/\.pdf$/i.test(name)) {
-        const { openPdf } = await import("@/lib/pdf-client")
-        const pdf = await openPdf(first)
-        const pages = pdf.pageCount
-        setPicked({ kind: "pdf", name, pages, sizeMB: Math.round(first.size / 1048576), handle: pdf })
-        setFrom(1)
-        setTo(pages)
-        setTitle(name.replace(/\.pdf$/i, ""))
-        fileRef.current = { kind: "pdf", name, handle: pdf, files: [first] }
-      } else if (/\.docx$/i.test(name)) {
-        const { extractDocx, docxBatches } = await import("@/lib/docx-client")
-        const doc = await extractDocx(first)
-        if (doc.charCount === 0) throw new Error("Word 文档里没有可提取的文字（可能是扫描件导出的图片）")
-        // Word 没有"页"，这里按**题**切块再打包成批：一批 = 一次模型调用。
-        // 早前是"每段开一个重叠窗口"，200 段的卷子要调 200 次模型（50 分钟以上），
-        // 现在同样的卷子约 12 批 —— 见 lib/docx-client.js 顶部的说明。
-        const batches = docxBatches(doc.paragraphs)
-        setPicked({
-          kind: "docx",
-          name,
-          pages: batches.length,
-          sizeMB: Math.round(first.size / 1048576),
-          doc,
-          paragraphs: doc.paragraphs.length,
-        })
-        setFrom(1)
-        setTo(batches.length)
-        setTitle(name.replace(/\.docx$/i, ""))
-        fileRef.current = { kind: "docx", name, doc, batches, files: [first] }
-      } else if (list.every((f) => /^image\//.test(f.type))) {
-        setPicked({
-          kind: "image",
-          name: list.length > 1 ? `${name} 等 ${list.length} 张` : name,
-          pages: list.length,
-          sizeMB: Math.round(list.reduce((a, f) => a + f.size, 0) / 1048576),
-        })
-        setFrom(1)
-        setTo(list.length)
-        setTitle(name.replace(/\.(png|jpe?g|webp)$/i, ""))
-        fileRef.current = { kind: "image", name, files: list, images: await Promise.all(list.map(readImage)) }
-      } else {
-        throw new Error("只支持 PDF、Word(.docx) 与图片（png/jpg/webp）；一个任务只放一种格式")
+      const onlyImages = list.every((f) => /^image\//.test(f.type))
+      if (onlyImages && current?.kind === "image") {
+        commitSource(slot, imageSource([...current.files, ...list]))
+        return
       }
+      commitSource(
+        slot,
+        await readSource(
+          list,
+          slot === "answer" ? questionRef.current : null,
+          // 答案区的 Word 按「行」打包，别按 5 题一批
+          slot === "answer" ? { docxBatches: ANSWER_DOCX_BATCHES } : undefined
+        )
+      )
     } catch (err) {
-      fileRef.current = null
-      setPicked(null)
+      // 只有「新选的文件本身读不出来」才清空：清掉别人的区会让人白白重选一遍
       toast.error(err?.message ?? "文件读取失败")
     } finally {
       setBusy("")
@@ -160,15 +188,37 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
     setTrial(null)
     try {
       const page = await buildPagePayload(fileRef.current, from, "auto")
-      // 有自己的密钥就浏览器直连上游（密钥不经过本站服务器），否则走站点兜底
+      // 有答案区就先把答案区跑一遍——否则试跑看到的是"模型自己解"的效果，
+      // 与真正建任务之后（答案来自答案区）不是同一件事。
+      let answerKey = null
+      if (answerRef.current) {
+        const { key, failures } = await parseAnswerSource({
+          jobId: null, // 试跑不落库
+          source: answerRef.current,
+          from: answerFrom,
+          to: answerTo,
+          key: null,
+          buildPayload: (src, n) => buildPagePayload(src, n, "auto"),
+          opts: { genAnalysis, defaultDifficulty: difficulty, paperMode },
+        })
+        if (failures.length > 0) {
+          toast.error(`答案区有 ${failures.length} 页没解析出来（${failures[0].error}），本次试跑没有用上答案区`)
+        }
+        answerKey = key
+      }
+      // 有自己的密钥就浏览器直连上游（密钥不经过本站服务器）；没有密钥在入口就拦下了
       const json = await trialParse({
         page,
-        opts: { genAnalysis, defaultDifficulty: difficulty, paperMode },
+        opts: { genAnalysis, defaultDifficulty: difficulty, paperMode, answerKey },
       })
       const r = json.results?.[0]
-      setTrial({ pageNo: from, mode: json.mode, ...r })
-      if (r?.ok) toast.success(`试跑成功：第 ${from} 页抽到 ${r.items?.length ?? 0} 道题`)
-      else toast.error(`试跑未通过：${r?.error ?? "未知原因"}`)
+      setTrial({ pageNo: from, mode: json.mode, keyCount: answerKey?.entries?.length ?? 0, ...r })
+      if (r?.ok) {
+        toast.success(
+          `试跑成功：第 ${from} 页抽到 ${r.items?.length ?? 0} 道题` +
+            (answerKey?.entries?.length ? `（答案区 ${answerKey.entries.length} 条已参与比对）` : "")
+        )
+      } else toast.error(`试跑未通过：${r?.error ?? "未知原因"}`)
     } catch (err) {
       toast.error(err?.message ?? "试跑失败")
     } finally {
@@ -195,7 +245,10 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
         },
         p_page_from: from,
         p_page_to: to,
-        p_answer: { mode: "embedded" },
+        // 答案区（0146）：不填 = 答案就在题目文件里（现状）；填了 = 先解析答案区再逐页比对
+        p_answer: answerPicked
+          ? { mode: "separate", from: answerFrom, to: answerTo }
+          : { mode: "embedded" },
         p_tag_ids: tags.map((t) => t.id),
         p_defaults: { gen_analysis: genAnalysis, difficulty },
       })
@@ -204,6 +257,25 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
       if (paperMode) {
         const { error: modeErr } = await supabase.rpc("import_set_paper_mode", { p_job_id: jobId })
         if (modeErr) throw new Error(modeErr.message)
+      }
+      // 答案区的「来源」必须先落库：源文件只在浏览器内存里，刷新之后就靠它告诉老师
+      // 该重选哪一份、共几页。答案内容本身由跑批前的预解析写入。
+      if (answerPicked) {
+        const { error: keyErr } = await supabase.rpc("import_set_answer_key", {
+          p_job_id: jobId,
+          p_key: {
+            version: 1,
+            source: { kind: answerPicked.kind, name: answerPicked.name, pages: answerPicked.pages },
+            from: answerFrom,
+            to: answerTo,
+            entries: [],
+            pages: [],
+            parsed_at: null,
+          },
+        })
+        // 写不进去不阻断建任务：内存里还有文件，这次跑批照样能用答案区，
+        // 只是刷新后续跑会不知道答案区是哪一份
+        if (keyErr) toast.warning(`答案区信息没能存进数据库（${keyErr.message}），刷新后需要重选答案文件`)
       }
       toast.success("任务已创建，开始解析")
       onCreated(jobId)
@@ -225,14 +297,14 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
         className={hasKey ? "space-y-5" : "space-y-5 opacity-50"}
       >
       <div className="rounded-xl border p-4">
-        <Label className="mb-2 block">1. 选择文件</Label>
+        <Label className="mb-2 block">1. 题目文件</Label>
         <input
           ref={inputRef}
           type="file"
           accept={ACCEPT}
           multiple
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => applyFiles("question", e.target.files)}
         />
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={!!busy}>
@@ -247,7 +319,28 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
                 : `${picked.pages} 页`}
             </span>
           )}
+          {picked?.kind === "image" && (
+            <Button variant="ghost" size="sm" onClick={() => clearSource("question")} disabled={!!busy}>
+              清空
+            </Button>
+          )}
         </div>
+
+        {/* 图片队列：多张照片按顺序变成第 1、2… 页。以前只有一个多选框，选完看不见顺序，
+            也没法补一张——「多图」这个能力实际上没人敢用。 */}
+        {picked?.kind === "image" && (
+          <div className="mt-3">
+            <ImageQueue
+              files={picked.files}
+              onChange={(files) => {
+                if (files.length === 0) return clearSource("question")
+                commitSource("question", imageSource(files))
+              }}
+              disabled={!!busy}
+            />
+          </div>
+        )}
+
         <p className="mt-2 text-xs text-muted-foreground">
           文件<b>不会上传</b>，只在你的浏览器里读取——所以几百兆的卷子也能导入。关闭页面后需要重新选择同一个文件才能继续。
           {picked?.kind === "docx" &&
@@ -255,10 +348,99 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
         </p>
       </div>
 
+      {/* 答案区（0146）：不填 = 答案在题目文件里（现状）。填了 = 先单独解析这份答案，
+          逐页比对后再抽题。只读展示迁移没跑时整个块隐藏（建任务时会撞看不懂的错）。 */}
+      {supportsAnswerZone && (
+        <div className="rounded-xl border p-4">
+          <Label className="mb-2 block">1b. 答案区（可选）</Label>
+          <input
+            ref={answerInputRef}
+            type="file"
+            accept={ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(e) => applyFiles("answer", e.target.files)}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={() => answerInputRef.current?.click()} disabled={!!busy}>
+              {busy === "answer" ? <Loader2Icon className="size-4 animate-spin" /> : <FileUpIcon className="size-4" />}
+              选择答案文件
+            </Button>
+            {answerPicked ? (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  {answerPicked.name} · {SOURCE_KINDS[answerPicked.kind]} · {answerPicked.sizeMB}MB ·{" "}
+                  {answerPicked.kind === "docx" ? `${answerPicked.pages} 批` : `${answerPicked.pages} 页`}
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => clearSource("answer")} disabled={!!busy}>
+                  移除
+                </Button>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                不选也可以——答案就在题目文件里，模型会自己找
+              </span>
+            )}
+          </div>
+
+          {answerPicked?.kind === "image" && (
+            <div className="mt-3">
+              <ImageQueue
+                files={answerPicked.files}
+                onChange={(files) => {
+                  if (files.length === 0) return clearSource("answer")
+                  commitSource("answer", imageSource(files))
+                }}
+                disabled={!!busy}
+              />
+            </div>
+          )}
+
+          {answerPicked && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                答案范围（{answerPicked.kind === "docx" ? "批" : "页"}）：
+              </span>
+              <Input
+                type="number"
+                min={1}
+                max={answerPicked.pages}
+                value={answerFrom}
+                onChange={(e) => {
+                  const v = Math.max(1, Math.min(answerPicked.pages, Number(e.target.value) || 1))
+                  setAnswerFrom(v)
+                  if (v > answerTo) setAnswerTo(v)
+                }}
+                className="w-20"
+              />
+              <span className="text-xs text-muted-foreground">到</span>
+              <Input
+                type="number"
+                min={answerFrom}
+                max={answerPicked.pages}
+                value={answerTo}
+                onChange={(e) =>
+                  setAnswerTo(Math.max(answerFrom, Math.min(answerPicked.pages, Number(e.target.value) || answerFrom)))
+                }
+                className="w-20"
+              />
+              <span className="text-xs text-muted-foreground">
+                共 {answerTo - answerFrom + 1} {answerPicked.kind === "docx" ? "批" : "页"}
+              </span>
+            </div>
+          )}
+
+          <p className="mt-2 text-xs text-muted-foreground">
+            答案单独成册（或就在同一份 PDF 的末尾几页）时用这里：模型会先把答案读成一份清单，
+            再逐页比对——对得上的直接用答案区的，与你题内/自行推导的不一致时**两份都保留**，在校对页里选。
+          </p>
+        </div>
+      )}
+
       {picked && (
         <div className="rounded-xl border p-4">
           <Label className="mb-2 block">
-            2. 导入范围{picked.kind === "docx" ? "（批）" : "（页）"}
+            2. 题目范围{picked.kind === "docx" ? "（批）" : "（页）"}
           </Label>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -317,6 +499,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
             </Button>
             <span className="text-xs text-muted-foreground">
               先花几十秒看一眼效果，比跑完 200 页才发现切图模式不对划算得多
+              {answerPicked && "（有答案区时会先把它整份读一遍，多花一点时间）"}
             </span>
           </div>
           {trial && (
@@ -327,7 +510,21 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
                     抽到 <b>{trial.items?.length ?? 0}</b> 道题
                     {trial.stats?.dropped > 0 && `（另有 ${trial.stats.dropped} 段内容没识别成题目）`}
                     {trial.readability && ` · 可读性 ${trial.readability}`}
+                    {trial.image_count != null && ` · 送图 ${trial.image_count} 张`}
+                    {trial.keyCount > 0 && ` · 答案区 ${trial.keyCount} 条`}
                   </p>
+                  {/* 试跑本来就是为了排查，模型原话要能看见：0 道题时它至少能区分
+                      "这页没有题"/"图没送上去"/"返回被截断" */}
+                  {trial.raw && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">
+                        查看模型原始返回
+                      </summary>
+                      <pre className="mt-1 max-h-52 overflow-auto rounded bg-background/60 p-2 text-[11px] whitespace-pre-wrap break-all">
+                        {trial.raw}
+                      </pre>
+                    </details>
+                  )}
                   <ul className="space-y-1 text-xs text-muted-foreground">
                     {(trial.items ?? []).slice(0, 3).map((it, i) => (
                       <li key={i} className="line-clamp-2">
@@ -418,11 +615,22 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
             免得教师以为紫色标记是解析出错。 */}
         <p className="mt-3 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs text-violet-900">
           <strong>答案怎么来。</strong>
-          原卷上有答案就照抄；<strong>没有的话模型会自己把题解出来</strong>，标成
-          「AI 推导答案」并在解析里写出推导过程，供你核对。实在解不出的会标成「缺答案」，
-          入库时被数据库拦下，需要你手工补。
+          {answerPicked ? (
+            <>
+              你在上面传了答案区：模型会先把它读成一份答案清单，再逐页比对——
+              对得上的题直接用<strong>答案区的答案</strong>（标「答案区答案」）；
+              与你题内/自行推导的不一致时<strong>两份都保留</strong>（标「答案冲突」），
+              在校对页里一键选一份。答案区没有的题，仍按下面的老规则处理。
+            </>
+          ) : (
+            <>
+              原卷上有答案就照抄；<strong>没有的话模型会自己把题解出来</strong>，标成
+              「AI 推导答案」并在解析里写出推导过程，供你核对。
+            </>
+          )}
           <span className="mt-0.5 block">
-            所以：原卷没答案也能用，但校对页的核对工作会更多——AI 推的答案请务必看一遍推导再放行。
+            实在解不出的会标成「缺答案」，入库时被数据库拦下，需要你手工补——
+            AI 推的答案请务必看一遍推导再放行。
           </span>
         </p>
       </div>
@@ -456,6 +664,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {SOURCE_KINDS[j.source_kind]} · 第 {j.page_from}-{j.page_to} 页
+                  {j.answer_mode === "separate" && " · 含答案区"}
                 </span>
                 <span className="ml-auto text-xs text-muted-foreground">
                   已解析 {j.done_pages}/{j.total_pages} 页 · 题 {j.item_count} · 已入库 {j.imported_count}
@@ -471,14 +680,79 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume }) {
 
 // ---------- 素材构造（向导试跑与跑批共用） ----------
 
-export async function readImage(file) {
-  const dataUrl = await new Promise((resolve, reject) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(fr.result)
-    fr.onerror = () => reject(new Error("图片读取失败"))
-    fr.readAsDataURL(file)
-  })
-  return { dataUrl, name: file.name }
+/**
+ * 多张图片的显示名。**向导与重选必须用同一个**：以前向导拼 "a.jpg 等 3 张"、
+ * rePick 却拿 file.name 去比，于是多图任务的确认框永远弹出来，还只挂上了一张。
+ */
+export function sourceDisplayName(kind, files) {
+  if (!files?.length) return ""
+  if (kind === "image" && files.length > 1) return `${files[0].name} 等 ${files.length} 张`
+  return files[0].name
+}
+
+export function imageSource(files) {
+  return {
+    kind: "image",
+    name: sourceDisplayName("image", files),
+    pages: files.length,
+    sizeMB: Math.round(files.reduce((n, f) => n + f.size, 0) / 1048576),
+    files,
+  }
+}
+
+export function isSameFile(a, b) {
+  return Boolean(a && b && a.name === b.name && a.size === b.size && a.lastModified === b.lastModified)
+}
+
+/**
+ * 把一次选择的文件读成「源」对象。一个区只放一种格式——混选时静默丢掉后面的文件，
+ * 会让人以为都导进去了（老代码对 PDF/Word 就是这么干的）。
+ *
+ * reuseFrom：答案区与题目区选的是**同一份 PDF** 时复用同一个句柄。
+ * 上百兆的卷子打开两次就是两份内存，而"答案在卷末几页"正是最常见的用法。
+ */
+export async function readSource(list, reuseFrom = null, opts = {}) {
+  const first = list[0]
+  const name = first.name
+  if (/\.pdf$/i.test(name)) {
+    if (reuseFrom?.kind === "pdf" && isSameFile(first, reuseFrom.files?.[0])) {
+      // 复用一个**干净的**源对象：直接把调用方传进来的对象返回去，
+      // 它身上可能挂着 answer 字段，套两层就成了自己引用自己
+      const { kind, name: n, pages, sizeMB, handle, files } = reuseFrom
+      return { kind, name: n, pages, sizeMB, handle, files }
+    }
+    const { openPdf } = await import("@/lib/pdf-client")
+    const pdf = await openPdf(first)
+    return {
+      kind: "pdf",
+      name,
+      pages: pdf.pageCount,
+      sizeMB: Math.round(first.size / 1048576),
+      handle: pdf,
+      files: [first],
+    }
+  }
+  if (/\.docx$/i.test(name)) {
+    const { extractDocx, docxBatches } = await import("@/lib/docx-client")
+    const doc = await extractDocx(first)
+    if (doc.charCount === 0) throw new Error("Word 文档里没有可提取的文字（可能是扫描件导出的图片）")
+    // Word 没有"页"，按**题**切块再打包成批：一批 = 一次模型调用（见 lib/docx-client.js）。
+    // 答案区要换一套打包参数：答案往往是 200 行「1.A 2.B」，按默认的 5 题一批会被切成
+    // 40 次调用（每次都要重传一遍 system），又慢又贵。
+    const batches = docxBatches(doc.paragraphs, opts.docxBatches)
+    return {
+      kind: "docx",
+      name,
+      pages: batches.length,
+      sizeMB: Math.round(first.size / 1048576),
+      doc,
+      batches,
+      paragraphs: doc.paragraphs.length,
+      files: [first],
+    }
+  }
+  if (list.every((f) => /^image\//.test(f.type))) return imageSource(list)
+  throw new Error("只支持 PDF、Word(.docx) 与图片（png/jpg/webp）；一个区只放一种格式")
 }
 
 /**
@@ -498,11 +772,22 @@ export async function readImage(file) {
  *   · image → images 是按页序排好的 [{ dataUrl, name }]
  */
 export async function buildPagePayload(file, pageNo, mode = "auto", detail = "high") {
-  if (!file) throw new Error("文件已不在内存里（刷新过页面？），请重新选择同一个文件再继续")
+  if (!file) throw new SourceFileError("文件已不在内存里（刷新过页面？），请重新选择同一个文件再继续")
   if (file.kind === "image") {
-    const img = file.images[pageNo - 1]
-    if (!img) throw new Error(`第 ${pageNo} 张图片不存在（选择的图片数量对不上）`)
-    const payload = { page_no: pageNo, mode: "vision", images: [{ data_url: img.dataUrl, w: 0, h: 0 }], detail }
+    const f = file.files?.[pageNo - 1]
+    if (!f) {
+      // 数量对不上 = 重选时少选/多选了，重试再多次也变不出那张图
+      throw new SourceFileError(
+        `第 ${pageNo} 张图片不在内存里（这次选了 ${file.files?.length ?? 0} 张，任务需要 ${file.pages} 张）`
+      )
+    }
+    const { tiles } = await tilesFor(f)
+    const payload = {
+      page_no: pageNo,
+      mode: "vision",
+      images: tiles.map((t) => ({ data_url: t.dataUrl, w: t.w, h: t.h })),
+      detail,
+    }
     return Object.assign(payload, (await prevPageContext(file, pageNo, detail)) ?? {})
   }
   if (file.kind === "docx") {
@@ -573,10 +858,13 @@ async function prevPageContext(file, pageNo, detail) {
   if (file.kind === "docx") return null
   try {
     if (file.kind === "image") {
-      const prev = file.images?.[pageNo - 2]
+      const prev = file.files?.[pageNo - 2]
       if (!prev) return null
-      const dataUrl = await bottomHalfOf(prev.dataUrl)
-      return dataUrl ? { prev_images: [{ data_url: dataUrl, w: 0, h: 0 }] } : null
+      // 与 PDF 完全同构：上一页的**最后一片**。以前是另存一份"下半页"的原始大图，
+      // 切图之后那半张反而成了唯一没被缩放正常处理的一块（分辨率与比例都对不上）。
+      const { tiles } = await tilesFor(prev)
+      const last = tiles[tiles.length - 1]
+      return last ? { prev_images: [{ data_url: last.dataUrl, w: last.w, h: last.h }] } : null
     }
     if (!file.handle) return null
     // 先看文字层（一次文本抽取，比 probe 便宜）：够厚就直接给原文片段
@@ -595,32 +883,5 @@ async function prevPageContext(file, pageNo, detail) {
       : null
   } catch {
     return null
-  }
-}
-
-// 图片素材（拍照/截图）：上一张的下半页。解码出的原图可能很大（手机照片 4000×3000），
-// 画完立刻把 canvas 归零释放，理由同 lib/pdf-client.js 的 renderPage。
-async function bottomHalfOf(dataUrl) {
-  const img = await new Promise((resolve, reject) => {
-    const el = new Image()
-    el.onload = () => resolve(el)
-    el.onerror = () => reject(new Error("图片解码失败"))
-    el.src = dataUrl
-  })
-  const sw = img.naturalWidth
-  const sh = Math.floor(img.naturalHeight / 2)
-  if (sw <= 0 || sh <= 0) return null
-  const canvas = document.createElement("canvas")
-  canvas.width = sw
-  canvas.height = sh
-  try {
-    const ctx = canvas.getContext("2d", { alpha: false })
-    ctx.fillStyle = "#ffffff"
-    ctx.fillRect(0, 0, sw, sh)
-    ctx.drawImage(img, 0, sh, sw, sh, 0, 0, sw, sh)
-    return canvas.toDataURL("image/jpeg", 0.72)
-  } finally {
-    canvas.width = 0
-    canvas.height = 0
   }
 }

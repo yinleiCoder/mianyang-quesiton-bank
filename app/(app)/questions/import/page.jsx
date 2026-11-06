@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
 import { isAttachable } from "@/lib/subject-nodes"
 import { loadSubjectNodes } from "@/lib/reference-data"
-import { loadImportJob, loadImportJobs, loadJobItems, loadJobPages } from "@/lib/import-jobs"
+import { loadImportJob, loadImportJobs, loadJobItems, loadJobPages, loadAnswerZoneSupport } from "@/lib/import-jobs"
 import { ImportPage } from "@/components/import/import-page"
 import { AccessDenied } from "@/components/access-denied"
 import { EmptyState } from "@/components/empty-state"
@@ -26,6 +26,8 @@ export default async function ImportQuestionPage({ searchParams }) {
 
   const supabase = await createClient()
   const nodes = await loadSubjectNodes()
+  // 0146 未执行时整个答案区入口隐藏：让人传了答案区、建任务时才报错，是最难自查的一种
+  const supportsAnswerZone = await loadAnswerZoneSupport(supabase)
   // 只用来判断"有没有能挂题的节点"。
   // **传给选择器的必须是全量节点**：专业课程挂在「专业大类 → 专业」下面，
   // 只传课程的话它们在树里找不到父级、整枝消失（选择器自己会把不可挂题的节点标灰）。
@@ -67,9 +69,14 @@ export default async function ImportQuestionPage({ searchParams }) {
     <div className="space-y-4">
       <PageHeader
         title="AI智能解析题库资料"
-        description="支持 PDF、Word(.docx) 与图片。文件不会上传——只把你选中的那几页渲染后交给模型，解析结果先经你校对，确认后才生成草稿。"
+        description="支持 PDF、Word(.docx) 与图片（可一次选多张）。答案在题目文件里也行，单独上传一份答案区也行——模型会逐页比对。文件不会上传，只把你选中的那几页渲染后交给模型，解析结果先经你校对，确认后才生成草稿。"
       />
-      <ImportPage nodes={nodes ?? []} jobs={jobs} initial={initial} />
+      <ImportPage
+        nodes={nodes ?? []}
+        jobs={jobs}
+        initial={initial}
+        supportsAnswerZone={supportsAnswerZone}
+      />
     </div>
   )
 }

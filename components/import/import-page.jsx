@@ -12,7 +12,12 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { loadImportJob, loadJobItems, loadJobPages, jobStateChip } from "@/lib/import-jobs"
-import { ImportWizard } from "@/components/import/import-wizard"
+import {
+  ImportWizard,
+  readSource,
+  imageSource,
+  ANSWER_DOCX_BATCHES,
+} from "@/components/import/import-wizard"
 import { ImportRun } from "@/components/import/import-run"
 import { ImportPreview } from "@/components/import/import-preview"
 import { ConfirmDialog } from "@/components/confirm-dialog"
@@ -20,10 +25,11 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Loader2Icon, FilesIcon, ListChecksIcon, Trash2Icon } from "lucide-react"
 
-export function ImportPage({ nodes, jobs, initial }) {
+export function ImportPage({ nodes, jobs, initial, supportsAnswerZone = true }) {
   const router = useRouter()
   const fileRef = useRef(null) // 文件 handle（不可序列化，只能放 ref）
   const fileInputRef = useRef(null)
+  const answerInputRef = useRef(null)
 
   const [job, setJob] = useState(initial?.job ?? null)
   const [pages, setPages] = useState(initial?.pages ?? [])
@@ -171,26 +177,51 @@ export function ImportPage({ nodes, jobs, initial }) {
     router.replace("/questions/import")
   }
 
-  // 重新选同一个文件：只做校验与挂载，不重跑已完成的页
-  async function rePick(files) {
-    const file = files?.[0]
-    if (!file || !job) return
-    if (file.name !== job.source_name) {
-      const ok = window.confirm(
-        `这次选的是「${file.name}」，任务记录的是「${job.source_name}」。\n页号可能对不上，仍要继续吗？`
-      )
-      if (!ok) return
-    }
+  // 重新选同一个文件：只做校验与挂载，不重跑已完成的页。
+  // **多图任务必须一次选齐**：page_no 是对 files 的下标，少选一张，后面每一页都会错位。
+  async function rePick(files, zone = "question") {
+    const list = Array.from(files ?? [])
+    if (list.length === 0 || !job) return
+    if (fileInputRef.current) fileInputRef.current.value = ""
+    if (answerInputRef.current) answerInputRef.current.value = ""
+
     try {
-      if (job.source_kind === "pdf") {
-        const { openPdf } = await import("@/lib/pdf-client")
-        fileRef.current = { kind: "pdf", name: file.name, handle: await openPdf(file), files: [file] }
-      } else if (job.source_kind === "docx") {
-        const { extractDocx } = await import("@/lib/docx-client")
-        fileRef.current = { kind: "docx", name: file.name, doc: await extractDocx(file), files: [file] }
+      if (zone === "answer") {
+        // 答案区复用题目区已打开的同名 PDF，避免把上百兆的卷子再读一遍
+        const src = await readSource(list, fileRef.current, { docxBatches: ANSWER_DOCX_BATCHES })
+        const need = job.answer_to ?? 0
+        if (need > src.pages) {
+          toast.error(`这次选了 ${src.pages} 页，答案范围到第 ${need} 页——请一次选齐`)
+          return
+        }
+        fileRef.current = { ...(fileRef.current ?? {}), answer: src }
+        toast.success("答案文件已就绪，可以继续解析")
+        setPages((p) => [...p])
+        return
+      }
+
+      if (job.source_kind === "image") {
+        const need = job.page_to
+        if (list.length < need) {
+          toast.error(`这次选了 ${list.length} 张，任务需要前 ${need} 张图——少一张后面每一页都会错位，请一次选齐`)
+          return
+        }
+        const src = imageSource(list)
+        const ok = list.length === job.source_pages || window.confirm(
+          `这次选了 ${list.length} 张，任务记录的是 ${job.source_pages} 张。\n多出来的图不会被解析，仍要继续吗？`
+        )
+        if (!ok) return
+        fileRef.current = { ...src, answer: fileRef.current?.answer ?? null }
       } else {
-        const { readImage } = await import("@/components/import/import-wizard")
-        fileRef.current = { kind: "image", name: file.name, files: [file], images: [await readImage(file)] }
+        const src = await readSource(list)
+        // 多图任务的 source_name 是拼出来的（"a.jpg 等 3 张"），必须用同一个拼法去比
+        if (src.name !== job.source_name) {
+          const ok = window.confirm(
+            `这次选的是「${src.name}」，任务记录的是「${job.source_name}」。\n页号可能对不上，仍要继续吗？`
+          )
+          if (!ok) return
+        }
+        fileRef.current = { ...src, answer: fileRef.current?.answer ?? null }
       }
       toast.success("文件已就绪，可以继续解析")
       setPages((p) => [...p]) // 触发一次重渲染，让"需要重选文件"的提示消失
@@ -201,7 +232,14 @@ export function ImportPage({ nodes, jobs, initial }) {
 
   if (!job) {
     return (
-      <ImportWizard nodes={nodes} jobs={jobs} fileRef={fileRef} onCreated={openJob} onResume={openJob} />
+      <ImportWizard
+        nodes={nodes}
+        jobs={jobs}
+        fileRef={fileRef}
+        onCreated={openJob}
+        onResume={openJob}
+        supportsAnswerZone={supportsAnswerZone}
+      />
     )
   }
 
@@ -250,8 +288,17 @@ export function ImportPage({ nodes, jobs, initial }) {
         ref={fileInputRef}
         type="file"
         accept=".pdf,.docx,image/png,image/jpeg,image/webp"
+        multiple
         className="hidden"
-        onChange={(e) => rePick(e.target.files)}
+        onChange={(e) => rePick(e.target.files, "question")}
+      />
+      <input
+        ref={answerInputRef}
+        type="file"
+        accept=".pdf,.docx,image/png,image/jpeg,image/webp"
+        multiple
+        className="hidden"
+        onChange={(e) => rePick(e.target.files, "answer")}
       />
 
       {/* 条件挂载（ConfirmDialog 的约定：不要常挂载再传 open） */}
@@ -284,6 +331,7 @@ export function ImportPage({ nodes, jobs, initial }) {
           onProgress={() => refresh(false)}
           onFinished={() => refresh(true)}
           onRePick={() => fileInputRef.current?.click()}
+          onRePickAnswer={() => answerInputRef.current?.click()}
         />
       ) : (
         <ImportPreview job={job} items={items} nodes={nodes} onRefresh={refresh} />

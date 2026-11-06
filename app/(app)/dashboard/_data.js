@@ -106,8 +106,25 @@ export const getRecent = cache(async () => {
   }
 })
 
+// 学校贡献统计是**全站同一份**、变化极慢的数据，但每次工作台渲染都会打一次 RPC
+// （跨境往返 170–460ms）。这里加一层**进程内 5 分钟缓存**：Fluid Compute 会复用实例，
+// 命中率不低；`cache()` 继续负责"同一请求内只查一次"。
+//
+// 不用 unstable_cache：它跑在**没有请求上下文**的缓存作用域里，而 createClient()
+// 要读 cookie，会直接抛。也不是按用户缓存——这份数据与调用者身份无关。
+const SCHOOL_STATS_TTL_MS = 5 * 60 * 1000
+let schoolStatsCache = null
+let schoolStatsAt = 0
+
 export const getSchoolStats = cache(async () => {
+  const now = Date.now()
+  if (schoolStatsCache !== null && now - schoolStatsAt < SCHOOL_STATS_TTL_MS) {
+    return schoolStatsCache
+  }
   const { data, error } = await (await createClient()).rpc("school_contribution_stats")
   // 学校贡献图表为可选区块：查询失败时隐藏卡片即可（学校贡献 RPC 未部署/无权限）
-  return error ? null : (data ?? [])
+  if (error) return null
+  schoolStatsCache = data ?? []
+  schoolStatsAt = now
+  return schoolStatsCache
 })

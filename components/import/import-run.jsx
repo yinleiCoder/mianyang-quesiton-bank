@@ -15,7 +15,8 @@ import { createClient } from "@/lib/supabase/client"
 import { PAGE_STATES, pageStateChip } from "@/lib/import-jobs"
 import { Button } from "@/components/ui/button"
 import { buildPagePayload } from "@/components/import/import-wizard"
-import { parseAndSavePages, MissingKeyError } from "@/lib/import-parse-client"
+import { SourceFileError } from "@/lib/image-client"
+import { parseAndSavePages, parseAnswerSource, MissingKeyError } from "@/lib/import-parse-client"
 import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
 import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon } from "lucide-react"
@@ -82,19 +83,47 @@ function releaseRunLock(jobId) {
   }
 }
 
-export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, onFinished, onRePick }) {
+export function ImportRun({
+  job,
+  pages,
+  fileRef,
+  onProgressPatch,
+  onProgress,
+  onFinished,
+  onRePick,
+  onRePickAnswer,
+}) {
   const [running, setRunning] = useState(false)
   const [laneState, setLaneState] = useState({})
+  // 答案区预解析的进度（0146）：{ pageNo, done, total, status }
+  const [answerPrep, setAnswerPrep] = useState(null)
   // 最近一页的耗时拆解：素材（浏览器渲染+编码）与请求（上传+模型+落库）分开计时。
   // 没有这个就只能靠猜——而"慢"的成因完全可能是本地上行带宽而不是模型。
   const [timing, setTiming] = useState(null)
   const [error, setError] = useState(null)
   const stopRef = useRef(false)
   const startedRef = useRef(false)
+  // 本次会话里老师选择了「跳过答案区」：之后不再尝试预解析（库里也会记 skipped）
+  const answerSkippedRef = useRef(false)
+  // 跑批循环读的是**这个 ref**，不是 job.answer_key：预解析刚写完的键还没走到父组件的
+  // 下一次渲染，runLane 的闭包里拿到的是旧值（等于这一轮白跑）。
+  const answerKeyRef = useRef(job.answer_key ?? null)
 
   // 密钥在 localStorage 里，SSR 读不到：用 hook 在挂载后读，避免 hydration 不一致
   const { hasKey, ready: keyReady, refresh: refreshKey } = useDeepSeekPrefs()
   const hasFile = Boolean(fileRef.current)
+  const hasAnswerFile = Boolean(fileRef.current?.answer)
+  const answerKey = job.answer_key ?? null
+  const answerMode = job.answer_mode === "separate"
+  // 答案区还没读完（且没被主动跳过）时，题目页必须先等它——否则那几页会用"没有答案区"
+  // 的方式解析完，而答案区补不回已经解析完的页。
+  const needAnswerPrepass =
+    answerMode &&
+    !answerKey?.parsed_at &&
+    !answerKey?.skipped &&
+    !answerSkippedRef.current &&
+    Number(job.answer_to ?? 0) >= Number(job.answer_from ?? 1)
+  const answerEntries = answerKey?.entries?.length ?? 0
   const remaining = pages.filter(
     (p) => p.attempts < 3 && (p.status === "pending" || p.status === "running")
   ).length
@@ -164,7 +193,9 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           // 上一页的末尾由 buildPagePayload 按页号现取（文字片段或底部截图），
           // **不再在这里按批内顺序传递**：那样跨批、跨车道的那道跨页题正好断在缝里。
           const payload = await buildPagePayload(handle, p.page_no, "auto", "high")
-          if (payload.images?.length > 8) payload.images = payload.images.slice(0, 8)
+          // 以前这里有句 `images.length > 8 → slice(0, 8)`：静默截断，页底那几片直接
+          // 不送给模型，而界面上看不出任何异常。现在切图几何由 planImageTiles 保证 ≤8，
+          // 真超了说明几何算错了——宁可让这一页失败，也不能悄悄少送半页。
           // **租约是每页一份，不是一批一份**：import_claim_pages 逐行
           // gen_random_uuid()，同一批认领回来的三页 token 各不相同。贴在素材上
           // 而不是另外传一个"本批的 token"——token 与它那一页绑死，配错就不可能发生。
@@ -194,6 +225,8 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
             defaultDifficulty: job.default_difficulty,
             // 整卷还原：提示词换成 PAPER_TAIL，并让 normalizePage 额外抽卷头/大题/分值
             paperMode: job.mode === "paper",
+            // 答案区（0146）：有答案键就交给模型比对；被跳过时 entries 为空，等于没有
+            answerKey: answerKeyRef.current,
           },
           // 每页落库就把服务端回传的进度并进本地状态（不查库）——先跑完的那页立刻变绿
           onPageSaved: (saved) =>
@@ -244,6 +277,13 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           setError(err.message)
           return
         }
+        if (err instanceof SourceFileError) {
+          // 源文件的问题（图片数量对不上 / 解码失败）重试变不出那张图，
+          // 只会重复认领同一页、重复失败——直接停下，别让那 3 次重试白烧钱
+          setError(err.message)
+          stopRef.current = true
+          return
+        }
         setError(err?.message ?? "解析失败")
         await sleep(2000)
       }
@@ -253,6 +293,86 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
       idleRounds = savedThisRound > 0 ? 0 : idleRounds + 1
       await sleep(MIN_ROUND_GAP_MS)
     }
+  }
+
+  /**
+   * 题目页之前先把答案区读成答案键（0146）。
+   * 返回 false = 这次不要继续解析题目页（失败 / 暂停 / 没文件）。
+   */
+  async function runAnswerPrepass() {
+    if (!hasAnswerFile) {
+      setError(
+        "答案文件不在内存里了（刷新过页面）。请点「重新选择答案文件」，或者跳过答案区继续——" +
+          "已经解析过的题目页不会再重跑。"
+      )
+      return false
+    }
+    const from = Number(job.answer_from) || 1
+    const to = Number(job.answer_to) || 1
+    setAnswerPrep({ total: to - from + 1, done: 0, pageNo: null, status: "running" })
+    try {
+      const { key, failures, stopped } = await parseAnswerSource({
+        jobId: job.id,
+        source: fileRef.current.answer,
+        from,
+        to,
+        // 上一次跑到一半的进度（pages 里记着哪几页已 ok）从这个 ref 里接着来
+        key: answerKeyRef.current,
+        buildPayload: (src, n) => buildPagePayload(src, n, "auto", "high"),
+        shouldStop: () => stopRef.current,
+        onPage: (p) => setAnswerPrep({ total: p.total, done: p.done, pageNo: p.pageNo, status: p.status }),
+        opts: {
+          genAnalysis: job.gen_analysis,
+          defaultDifficulty: job.default_difficulty,
+          paperMode: job.mode === "paper",
+        },
+      })
+      answerKeyRef.current = key
+      onProgressPatch?.({ job: { answer_key: key } })
+      setAnswerPrep((s) => ({ ...(s ?? {}), status: "done" }))
+      if (stopped) return false
+      if (failures.length > 0) {
+        setError(
+          `答案区有 ${failures.length} 页没解析出来（第 ${failures[0].page_no} 页：${failures[0].error}）。` +
+            `点「继续解析」会只重试这几页；也可以「跳过答案区继续」，题目页会改用题内答案/AI 推导。`
+        )
+        return false
+      }
+      return true
+    } catch (err) {
+      setError(err?.message ?? "答案区解析失败")
+      setAnswerPrep((s) => ({ ...(s ?? {}), status: "failed" }))
+      return false
+    }
+  }
+
+  // 放弃答案区：把 skipped 记进库，之后不再自动尝试（已解析出的条目保留）
+  async function skipAnswerZone() {
+    if (running) return
+    const supabase = createClient()
+    const base = job.answer_key ?? {}
+    const next = {
+      ...base,
+      version: 1,
+      from: job.answer_from,
+      to: job.answer_to,
+      entries: base.entries ?? [],
+      pages: base.pages ?? [],
+      skipped: true,
+      parsed_at: new Date().toISOString(),
+    }
+    const { error: err } = await supabase.rpc("import_set_answer_key", { p_job_id: job.id, p_key: next })
+    if (err) return toast.error(err.message)
+    answerSkippedRef.current = true
+    onProgressPatch?.({ job: { answer_key: next } })
+    setError(null)
+    setAnswerPrep(null)
+    const kept = next.entries.length
+    toast.success(
+      kept > 0
+        ? `已跳过答案区：已解析出的 ${kept} 条仍会用上，其余题目按题内答案 / AI 推导`
+        : "已跳过答案区：题目页会按题内答案 / AI 推导解析"
+    )
   }
 
   async function start(force) {
@@ -275,6 +395,11 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
     // 心跳：让其他标签页知道这里在跑（15 秒没心跳就视为已停止）
     const beat = setInterval(() => acquireRunLock(job.id), 5000)
     try {
+      // 答案区必须先读完：等题目页跑过之后再补答案键，已解析的页补不回来
+      if (needAnswerPrepass) {
+        const ok = await runAnswerPrepass()
+        if (!ok) return
+      }
       // 单车道：并发已经在 runLane 内部（一批多页并发调模型），这里再并发就会变成并发写库
       await runLane(0)
     } finally {
@@ -323,6 +448,7 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           >
             <PlayIcon className="size-4" />
             {remaining > 0 ? `继续解析（剩 ${remaining} 页）` : "开始解析"}
+            {needAnswerPrepass && " · 先解析答案区"}
           </Button>
         ) : (
           <Button variant="outline" onClick={stop}>
@@ -345,6 +471,37 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           </span>
         )}
       </div>
+
+      {/* 答案区（0146）：单独一行说清它现在是什么状态——「待解析 / 解析中 3/10 / 已解析 N 条 /
+          已跳过」。没有这行，老师只会看到题目页迟迟不开始，不知道在等什么。 */}
+      {answerMode && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <span className="font-medium">答案区</span>
+          <span className="text-muted-foreground">
+            {answerKey?.skipped || answerSkippedRef.current
+              ? "已跳过（题目页按题内答案 / AI 推导解析）"
+              : answerPrep?.status === "running"
+                ? `解析中${answerPrep.pageNo ? `（第 ${answerPrep.pageNo} 页）` : ""} · 已完成 ${answerPrep.done}/${answerPrep.total}`
+                : needAnswerPrepass
+                  ? hasAnswerFile
+                    ? "待解析（会在题目页之前先跑一遍）"
+                    : "答案文件不在内存里，需要重新选择"
+                  : answerEntries > 0
+                    ? `已解析 ${answerEntries} 条${answerKey?.partial ? "（有页失败，可再点继续解析）" : ""}`
+                    : "已解析（没有抽到答案条目）"}
+          </span>
+          {!running && needAnswerPrepass && !hasAnswerFile && onRePickAnswer && (
+            <Button size="sm" variant="outline" onClick={onRePickAnswer}>
+              重新选择答案文件
+            </Button>
+          )}
+          {!running && needAnswerPrepass && (
+            <Button size="sm" variant="ghost" onClick={skipAnswerZone}>
+              跳过答案区
+            </Button>
+          )}
+        </div>
+      )}
 
       {!hasFile && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -395,7 +552,10 @@ export function ImportRun({ job, pages, fileRef, onProgressPatch, onProgress, on
           })}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          点某一页可以跳过它（封面、答案页、空白页不值得花钱解析）。解析失败的页会显示红色描边。
+          点某一页可以跳过它（封面、空白页不值得花钱解析）。答案解析失败的页会显示红色描边。
+          {answerMode
+            ? " 答案页请放在答案区，不要混进题目范围。"
+            : " 答案在卷末时，也可以新建任务时把它上传到「答案区」单独解析。"}
         </p>
       </div>
     </div>

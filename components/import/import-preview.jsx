@@ -12,6 +12,7 @@
 // 于是「不导入」一道没勾选的题就是一次看不见的操作，被当成按钮坏了。
 
 import { useEffect, useMemo, useState } from "react"
+import { answerTextOf, answerTextOfAnswer } from "@/lib/import-answer-key"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { FLAG_LABELS } from "@/lib/import-jobs"
@@ -72,6 +73,8 @@ const dupLevel = (sim) => DUP_LEVELS.find((l) => sim >= l.min) ?? DUP_LEVELS[2]
 const FILTERS = [
   { key: "all", label: "全部", match: () => true },
   { key: "noanswer", label: "缺答案", match: (i) => needsAnswer(i) },
+  // 0146：答案区与题内/AI 推导给出了不同答案。只对客观题标，主观题的措辞差异不算
+  { key: "conflict", label: "答案冲突", match: (i) => i.flags.includes("answer_conflict") },
   // 查重结果可能还没回来（dups 是异步的），所以访问一律空安全：缺上下文 = 这条不命中
   { key: "flagged", label: "有提示", match: (i, ctx) => i.flags.length > 0 || (ctx?.crossPageDups?.has(i.id) ?? false) },
   // 只筛"值得看一眼"的两档；0.55~0.70 那一档是常态，筛出来反而干扰
@@ -87,21 +90,25 @@ const needsAnswer = (it) => draftIssues(it.qtype, it.content).some((s) => s.incl
 // 跨页比对用的归一化：空白（含全角空格）全部去掉，避免排版换行影响"包含"判断
 const normText = (s) => String(s ?? "").replace(/\s+/g, "")
 
-// 行内展示答案：一眼能看出"这题有没有答案"。返回 null 表示没有答案
-function answerText(content) {
-  const a = content?.answer
-  if (!a) return null
-  if (a.type === "choice") return a.keys?.length ? a.keys.join("") : null
-  if (a.type === "tf") return a.value === true ? "对" : a.value === false ? "错" : null
-  if (a.type === "blank") {
-    const vs = (a.values ?? []).filter((v) => String(v ?? "").trim() !== "")
-    return vs.length ? vs.join(" / ") : null
+// 行内展示答案：一眼能看出"这题有没有答案"。返回 null 表示没有答案。
+// 实现挪到 lib/import-answer-key.js：复合题要按小问拼（以前这里一律返回 null，
+// 于是每道复合题都显示"未指定答案"），而那种拼法在测试里也要能单测。
+const answerText = (content) => answerTextOf(content)
+
+// 另一份答案（0146）的摘要。复合题按小问下标拼，与 answerText 的编号口径一致。
+function altText(it) {
+  const alt = it?.answer_alt
+  if (!alt) return null
+  if (Array.isArray(alt.subs)) {
+    const parts = alt.subs
+      .map((s) => {
+        const t = answerTextOfAnswer(s?.answer)
+        return t ? `${(s.index ?? 0) + 1}.${t}` : null
+      })
+      .filter(Boolean)
+    return parts.length ? parts.join(" ") : null
   }
-  if (a.type === "text") {
-    const ss = (a.samples ?? []).filter(Boolean)
-    return ss.length ? ss[0].slice(0, 24) + (ss[0].length > 24 ? "…" : "") : null
-  }
-  return null
+  return answerTextOfAnswer(alt.answer)
 }
 
 export function ImportPreview({ job, items, nodes = [], onRefresh }) {
@@ -343,6 +350,23 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
     }
   }
 
+  // 「改用另一份」：调 RPC 把主答案与 answer_alt **互换**（两份都留着，不是覆盖）。
+  // 不能用 import_update_item 代替——那个是以表单为准的重填，会把另一份永久丢掉。
+  async function switchAnswer(item) {
+    setBusy(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.rpc("import_switch_item_answer", { p_item_id: item.id })
+      if (error) throw new Error(error.message)
+      toast.success("已改用另一份答案")
+      await onRefresh()
+    } catch (err) {
+      toast.error(err?.message ?? "切换失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function setStatus(ids, status) {
     if (ids.length === 0) return
     // 已入库的题库里改不了（RPC 里也排除了 imported）：别写、也别盖乐观值——盖了服务端
@@ -570,8 +594,27 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
     })
   }
 
+  const keyStats = useMemo(() => {
+    let fromKey = 0
+    let conflict = 0
+    for (const it of items) {
+      if (it.flags.includes("answer_from_key")) fromKey += 1
+      if (it.flags.includes("answer_conflict")) conflict += 1
+    }
+    return { fromKey, conflict }
+  }, [items])
+
   return (
     <div className="space-y-3">
+      {/* 答案区（0146）的汇总：一眼看出这次有多少答案真的来自答案区、有多少需要二选一 */}
+      {job.answer_mode === "separate" && (job.answer_key?.entries?.length ?? 0) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          答案区：{job.answer_key?.source?.name ?? "已上传"}
+          {job.answer_key?.skipped && "（已跳过，未参与本次解析）"} · 答案来自答案区{" "}
+          <b className="text-emerald-700">{keyStats.fromKey}</b> 条 · 两份不一致{" "}
+          <b className={keyStats.conflict > 0 ? "text-amber-700" : ""}>{keyStats.conflict}</b> 条
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
           <button
@@ -707,10 +750,16 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
                     className={`rounded px-1.5 py-0.5 ${
                       f === "answer_missing" || f === "blank_mismatch"
                         ? "bg-rose-100 text-rose-700"
-                        : f === "ai_analysis" || f === "ai_answer"
-                          // AI 生成的内容统一用紫色：它们不是原卷内容，需要人负核对责任
-                          ? "bg-violet-100 text-violet-700"
-                          : "bg-amber-100 text-amber-700"
+                        : f === "answer_conflict"
+                          // 两份答案都在，需要人二选一——比"缺答案"轻，比"AI 推导"重
+                          ? "bg-orange-100 text-orange-700"
+                          : f === "answer_from_key"
+                            // 答案来自答案区：这是好消息（有人工给的答案可依），用绿色
+                            ? "bg-emerald-100 text-emerald-700"
+                            : f === "ai_analysis" || f === "ai_answer"
+                              // AI 生成的内容统一用紫色：它们不是原卷内容，需要人负核对责任
+                              ? "bg-violet-100 text-violet-700"
+                              : "bg-amber-100 text-amber-700"
                     }`}
                   >
                     {FLAG_LABELS[f]?.text ?? f}
@@ -825,6 +874,24 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
                   </span>
                 ) : (
                   <span className="text-rose-600">未指定答案</span>
+                )}
+                {/* 0146：答案区与题内/AI 推导不一致时，两份都摆在行内（默认主答案来自答案区） */}
+                {altText(it) && (
+                  <span className="ml-2 text-amber-700">
+                    另一份：<span className="text-foreground/90">{altText(it)}</span>
+                    {it.status !== "imported" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ml-1 h-6 px-1.5 text-xs text-amber-800 hover:bg-amber-50"
+                        disabled={busy}
+                        onClick={() => switchAnswer(it)}
+                        title="把两份答案对调（两份都保留，随时可以换回来）"
+                      >
+                        改用这一份
+                      </Button>
+                    )}
+                  </span>
                 )}
               </p>
               {(suggestion || accepted?.length > 0) && (

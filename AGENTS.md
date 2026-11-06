@@ -320,3 +320,98 @@ autovacuum 在 13:15 UTC 回收了旧行，heap 里已无法恢复。只能从 S
 - **别把 OSS 挂 Cloudflare**：大陆会被调度到境外节点，且 `supabase-proxy/README.md` 已写明。
 - 切 CDN 时：媒体地址只改 `NEXT_PUBLIC_OSS_PUBLIC_HOST`；
   **签名下载继续签桶自己的域名**（`app/api/materials/download/route.js:63-64`）。
+
+## 交卷前的作答跨设备同步（2026-11-06，0144）
+
+**考试与练习「还没交的作答」都存服务端了**，换台设备 / 关掉软件再打开都能接着答。
+两条通道只装草稿，**不碰统计口径**（交卷仍写 `exam_answers` / `practice_answers`）：
+
+| 场景 | 落点 | RPC | 客户端 |
+|---|---|---|---|
+| 考试 | `exam_attempts.draft_answers` | `save_exam_answers` / `get_exam_drafts` | 本机 `exam.draft.*` 兜底 + `ExamDraftBuffer`（800ms 节流） |
+| 练习 | `practice_sessions.draft_answers` | `save_practice_progress`（也登记 `mode`） | `PracticeRunner`，只对批量 / 顺序模式发 |
+
+**考试离开页面会暂停计时**（2026-11-06 用户口径，后来又明确了一次）：
+`exam_attempts.remaining_ms` 冻结剩余毫秒，读考试时（`get_my_exam_attempt` /
+`start_exam_attempt` 调 `_resume_exam_attempt_if_paused`）用 `now + remaining_ms`
+换回一个新截止时刻。客户端只在 `ExamPage.dispose` 发一次 `pause_exam_attempt`。
+
+⚠ 三条边界：
+
+- **切后台 / 回前台不停表**：用户明确要求"时间依然计时"。只 flush 草稿，
+  不要动 deadline；`didChangeAppLifecycleState` 里除了草稿不要加别的事。
+- **恢复必须挂在读路径上**：旧客户端不会调 resume，它拿到的 `deadline_at`
+  还停在暂停那一刻，倒计时一进来就归零，会**当场把卷子交掉**。
+  `get_my_exam_attempt` 因此从 `stable` 改成了 volatile，别改回去。
+- **用时 = 总时长 − 剩余**（`ExamClock.elapsedOf`），不能用 `now - started_at`：
+  隔天回来会被算成"答了 10 小时"。
+
+五条别再踩的：
+
+- **逐题合并，不是整卷覆盖**：客户端只发改过的那几道，服务端 `||` 合并，空对象 = 删除该题。
+  整卷覆盖会让两台设备互相盖掉对方刚写的答案。
+- **考试的两份草稿按时刻合并**：本机 `exam.draftAt.<id>` 与服务端 `draft_updated_at` 比，
+  本机更新才覆盖；否则服务端优先、本机只补服务端没有的题（断网时写的）。
+- **考试用时不能再按墙钟差算**：`now - started_at` 会把"离开一晚上"算成答了 10 小时。
+  用 `ExamClock.elapsedOf(总时长)` = 总时长 − 剩余；截止时刻缺失时才退回墙钟。
+- **练习方式必须存在会话上**（`practice_sessions.mode`）：0144 之前只存在客户端，
+  于是「继续练习」永远按即时练习重开——批量练习会被逐题提交，顺序讲练更违反 0090。
+  开练时 `startPracticeFlow` **await** 一次 `save_practice_progress` 再进页面。
+- **即时练习不走草稿通道**：它每答一题就走 `submit_practice_answer`，再存草稿是重复。
+  批量（交卷前不提交）与顺序讲练（0090 一个答案都不交）才需要；它们的
+  `answered_count` 由 `save_practice_progress` 按草稿数维护（首页「继续练习」卡读它）。
+
+## AI 智能解析：图片队列 + 答案区（2026-11-06，0146）
+
+两件事一起做的：**图片可以一次传多张**，**答案可以单独传一份**。都只改浏览器侧
+（源文件仍然不上传），数据库只加两列 + 三个小函数。
+
+### 图片：队列与切图
+
+- 「多图」原本就有（一张 = 一页），坏在**看不见**：没有缩略图/顺序/追加，续跑时
+  `rePick` 只收一张。现在 `components/import/image-queue.jsx` 管缩略图与顺序。
+- **队列只在建任务之前可编辑**。页号写进 `import_job_pages` 之后再删/挪一张，
+  第 7 页会静默换成另一张照片；跑批页的重选一律 `editable={false}`，只按张数校验。
+- **续跑必须一次选齐**：`page_no` 是 `files` 的下标（`buildPagePayload` 的 image 分支）。
+  少一张，后面每一页都错位——所以 `rePick` 在数量不足时直接拒绝，不弹确认。
+- **上传的图必须切片**（`lib/image-client.js`）：宽度归一到 A4@180dpi（1489px），
+  每片 ≤1.6M 像素、最多 8 片。上游会把大图缩到约 800×800，整页照片不切就是糊的
+  （PDF 路径早就按同一口径切 1×2，见 `lib/pdf-client.js:194-200`）。
+- 片数由 `planImageTiles` 的几何保证——**不要再写 `images.slice(0, 8)` 那种静默截断**，
+  它会让页底整块看不见而界面毫无提示。
+- 解码改成**按需**（选完只存 `File[]`，`tilesFor` 带 2 条缓存）：选 30 张就先把 30 份
+  dataURL 全读进内存，是以前卡顿的来源。
+
+### 答案区：答案键 + 另一份答案
+
+- 形状：`import_jobs.answer_key`（题号 → 答案文本 + 逐页进度）与
+  `import_job_items.answer_alt`（与主答案不一致的那一份）。**answer_alt 绝不进 content**——
+  `import_questions_draft` 会把 content 原样抄进 `question_versions`。
+- 流程：跑题目页**之前**先把答案区读成键（`parseAnswerSource`，逐页落库、`pages[]` 记成败、
+  `parsed_at` 只在全部成功时打）。已解析的题目页补不回来，所以顺序不能反。
+- 答案键的**文本**放进 user 消息的**最前面**（`buildAnswerKeyBlock`）：system + 答案键
+  是每页共享的缓存前缀。规则写在 `ANSWER_KEY_TAIL`，`SYSTEM_PROMPT` / `USER_TAIL` /
+  `PAPER_TAIL` **一个字都没改**（它们必须逐字节稳定）。
+- **一切以 `ctx.hasAnswerKey` 为闸**：没有键时 `answer_source:"key"`、`answer_alt`、
+  两个新 flags 一律不产生。这同时是「迁移没跑」的降级路径——老 CHECK 不会被撞。
+- 冲突**只对客观题标**（选择/判断/填空）。简答题措辞不同是常态，见一条标一条，
+  这个徽标很快就会被无视（同上一节「查重」的教训）。主观题仍保留两份，只是不打标记。
+- 主答案默认放**答案区**那份（2026-11-06 用户选定），另一份进 `answer_alt`，
+  预览页「改用这一份」走 `import_switch_item_answer`（**互换**）。
+  用 `import_update_item` 代替会把另一份永久丢掉，那不是切换。
+- 答案区的 Word 用 `docxBatches(doc.paragraphs, { perBatch: 40, maxChars: 8000 })`：
+  答案是一行一题，默认 5 题一批会把 200 行答案切成 40 次调用。
+
+### 三条别再踩的
+
+- **不改 `import_save_page`**。要多写一列就用包装函数 `import_save_page_with_alts`：
+  它调原函数再补一次 UPDATE，原函数的租约/幂等/人工修改守卫一条没变。
+- **p_alts 的 seq 是 `p_items` 的数组下标**，不是 `it.seq`——`normalizePage` 的 seq
+  赋值在去重之前，两者会错位，错位就把答案挂到别的题上。
+- **新列读取要能降级**：`loadImportJob` / `loadJobItems` 读不到 `answer_key` /
+  `answer_alt` 时退回旧列（`lib/import-jobs.js` 的列阶梯），`loadAnswerZoneSupport`
+  探一下 0146 在不在、不在就整个隐藏答案区入口。一条辅助信息不该让整页打不开。
+
+自检：`npm run test:import`（答案键归一/去重、`hasAnswerKey` 闸门、冲突判定、
+切图几何、截断抢救）。2026-11-06 用真模型联调过：答案区 7 条全部抽出，
+故意写错的那道题主答案取答案区的、AI 的进 `answer_alt` 并标 `answer_conflict`。
