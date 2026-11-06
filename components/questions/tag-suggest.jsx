@@ -58,6 +58,13 @@ export function TagSuggest({
     () => (subjectNodeId ? tagsInScope(tags, subjectNodeId, nodes) : []),
     [tags, subjectNodeId, nodes]
   )
+  // 换科目后上一轮推荐全部作废：它们是按旧学科的候选池算出来的，留着还能点「采纳」，
+  // 就会把别的学科的标签打进这道题（入库只校验标签存在，不校验学科——见 check_tags_exist）。
+  useEffect(() => {
+    setSuggestions(null)
+    setError("")
+  }, [subjectNodeId])
+
   const stemText = blocksToText(draft?.stem ?? [])
   const canRun = Boolean(subjectNodeId) && stemText.trim().length >= 10 && tagPool.length > 0
   const hint = !subjectNodeId
@@ -140,8 +147,17 @@ export function TagSuggest({
   }
 
   function adopt(items) {
-    const picked = items.map((item) => item.tag).filter(Boolean)
-    if (picked.length === 0) return
+    // 双保险：只采纳仍在**当前**候选池里的（上面的 effect 已经会清掉旧建议，
+    // 但采纳与换科目可能发生在同一帧里，这里再按当下的池子筛一次）
+    const allowed = new Set(tagPool.map((tag) => tag.id))
+    const picked = items
+      .map((item) => item.tag)
+      .filter((tag) => tag && allowed.has(tag.id))
+    if (picked.length === 0) {
+      setSuggestions(null)
+      setError("科目已更换，这些建议不再适用，请重新推荐")
+      return
+    }
     onAdd?.(picked)
     // 已采纳的从建议里移除，方便逐条点；全部采纳后列表为空。
     setSuggestions((prev) =>

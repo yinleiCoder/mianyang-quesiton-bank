@@ -44,12 +44,17 @@ export function TagPicker({
     }
   }, [])
 
+  // 调用方可能用空串表示"还没选科目"（表单初始值常见），但空串传给 PostgREST 的
+  // uuid 参数不会被当成"没传"，而是报 `invalid input syntax for type uuid: ""`。
+  // 组件对外口径是"空 = null"，这里归一一次，新建标签与候选过滤都用它。
+  const scopeId = subjectNodeId || null
+
   // 卡在"科目还没选"上：这时不筛（见文件头），但要说一句，
   // 否则教师会以为知识点怎么变少了。
-  const scoped = Boolean(subjectNodeId)
+  const scoped = Boolean(scopeId)
   const pool = useMemo(
-    () => tagsInScope(all, subjectNodeId, nodes),
-    [all, subjectNodeId, nodes]
+    () => tagsInScope(all, scopeId, nodes),
+    [all, scopeId, nodes]
   )
   const { ancestorPathOf } = useMemo(() => tagIndex(all ?? []), [all])
 
@@ -74,13 +79,20 @@ export function TagPicker({
 
   async function createAndAdd() {
     if (creating) return
+    // 没有科目就**不建**：裸标签（subject_node_id 为 null）不会出现在任何学科的候选里，
+    // 建完就"失踪"，正是 0096 要治的病。这里挡住并说清楚下一步该点什么，
+    // 而不是把空值发给 create_tag 换回一句 `invalid input syntax for type uuid: ""`。
+    if (!scopeId) {
+      toast.warning("请先选择所属科目，再新建知识点标签")
+      return
+    }
     setCreating(true)
     const supabase = createClient()
     // 带上科目：新知识点从出生起就归在这个学科下（0096）。
     // 只传 p_name 的旧写法会造出"未归类"的裸标签，正是这次要治的病。
     const { data: id, error } = await supabase.rpc("create_tag", {
       p_name: s,
-      p_subject_node_id: subjectNodeId,
+      p_subject_node_id: scopeId,
     })
     setCreating(false)
     if (error) {
@@ -95,7 +107,7 @@ export function TagPicker({
       toast.error(error.message)
       return
     }
-    const tag = { id, name: q.trim(), subject_node_id: subjectNodeId, parent_id: null }
+    const tag = { id, name: q.trim(), subject_node_id: scopeId, parent_id: null }
     setAll((prev) => (prev ? [...prev, tag] : [tag]))
     addExisting(tag)
     // 本页候选池已就地补上，但题库 /bank 的筛选条与标签管理页读的是服务端那份缓存，
@@ -178,6 +190,12 @@ export function TagPicker({
                   </button>
                 )
               })
+            ) : !scoped && s ? (
+              // 没选科目就不给"新建"按钮：摆在面前的按钮点了只会被拒，
+              // 不如直接把顺序说清楚（回车时另有一句 toast，见 createAndAdd）
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">
+                没有找到「{q.trim()}」。先选定所属科目，再来新建知识点标签。
+              </p>
             ) : s ? (
               // 无匹配 → 回车/点击新建（名称即输入值，落在本题所属科目下）
               <button
@@ -193,7 +211,11 @@ export function TagPicker({
               </button>
             ) : (
               <p className="px-2 py-1.5 text-sm text-muted-foreground">
-                {value.length ? "已选择全部可选标签" : "暂无可选标签，输入名称回车即可创建"}
+                {value.length
+                  ? "已选择全部可选标签"
+                  : scoped
+                    ? "暂无可选标签，输入名称回车即可创建"
+                    : "暂无可选标签。请先选定所属科目，再新建知识点标签。"}
               </p>
             )}
           </div>
@@ -201,7 +223,7 @@ export function TagPicker({
       </div>
       {!scoped && (
         <p className="text-xs text-muted-foreground">
-          还没选科目：候选暂列全部知识点。选定科目后只显示该学科下的。
+          还没选科目：候选暂列全部知识点；选定科目后才能新建，且只显示该学科下的。
         </p>
       )}
     </div>

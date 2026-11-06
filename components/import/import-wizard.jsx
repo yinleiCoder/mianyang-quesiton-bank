@@ -64,7 +64,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, suppor
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(1)
   const [title, setTitle] = useState("")
-  const [nodeId, setNodeId] = useState("")
+  const [nodeId, setNodeId] = useState(null) // 未选 = null（别用空串：它会被塞进 uuid 参数）
   const [tags, setTags] = useState([]) // TagPicker 的值是 {id,name} 对象数组，入库前要 .map(t => t.id)
   const [difficulty, setDifficulty] = useState(2)
   const [genAnalysis, setGenAnalysis] = useState(true)
