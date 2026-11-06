@@ -415,3 +415,13 @@ autovacuum 在 13:15 UTC 回收了旧行，heap 里已无法恢复。只能从 S
 自检：`npm run test:import`（答案键归一/去重、`hasAnswerKey` 闸门、冲突判定、
 切图几何、截断抢救）。2026-11-06 用真模型联调过：答案区 7 条全部抽出，
 故意写错的那道题主答案取答案区的、AI 的进 `answer_alt` 并标 `answer_conflict`。
+
+## AI 解析任务按教师隔离（2026-11-06，0147）
+
+AI 智能解析的任务**绑定创建它的老师**，不同老师完全隔离（0147）。0034 当初把读放宽成
+「本人 / 本校学校管理员 / 系统管理员」，0147 收回了：解析中的整卷内容、答案区和没定稿的
+题目不该给同校其他人看，学校管理员与系统管理员也一样。写路径从 0035 起本来就只认创建者。
+
+改可见性时**别只改 `import_jobs` 的策略**：`import_job_pages` / `import_job_items` /
+`import_job_sections` 三张表的读策略都走 `is_import_job_owner()`，那个函数才是主开关，
+`import_find_similar` 的守卫也用它。`import_jobs` 自己的策略是内联展开的，需要单独改。

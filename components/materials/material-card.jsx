@@ -91,12 +91,17 @@ export function MaterialCard({ material, nodes, canManage, onDelete, onTogglePub
         {/* 下载走服务端路由而不是 href：那条路由会签一条**带文件名**的地址再 302 过去
             （见 app/api/materials/download/route.js），顺带把下载次数 +1。
             直接给 OSS 公网地址的话，存下来的文件名是一串 uuid。 */}
-        <Button size="sm" render={<a href={`/api/materials/download?id=${material.id}`} />}>
+        <Button
+          size="sm"
+          nativeButton={false}
+          render={<a href={`/api/materials/download?id=${material.id}`} />}
+        >
           <DownloadIcon className="size-4" /> 下载
         </Button>
         <Button
           variant="outline"
           size="sm"
+          nativeButton={false}
           render={<a href={href} target="_blank" rel="noreferrer" />}
         >
           <ExternalLinkIcon className="size-4" /> 打开
