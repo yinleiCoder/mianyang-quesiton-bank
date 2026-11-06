@@ -1,19 +1,21 @@
 "use client"
 
 // 单题编辑面板（预览页展开用）。刻意做轻：只改解析最常出错的那几处——
-// 题干文字、选项、答案、解析、题型与难度。
-// 媒体块、复合题子题排序这类细节留给「我的题目」里的完整编辑器（草稿本来就允许后续编辑），
+// 题干文字、选项、答案、解析、题型与难度，以及**复合题每个小问的题干**
+//（小问拆分与串联是解析最常见的错，校对页不给改就只能入库后再找）。
+// 小问的题型/选项/答案与排序留给「我的题目」里的完整编辑器（草稿本来就允许后续编辑），
 // 这样既不重复实现一遍编辑器，也不用动那个 649 行的关键页面。
 //
 // 挂载方式：**条件挂载**（{editing === it.id && <ImportItemEditor …/>}）——
 // React Compiler 会把常挂载组件里被记忆化闭包捕获的 state.prop 提到渲染期求值，
 // item 为 null 时首渲染就崩。
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
 import { blocksToPlain, textToBlocks, draftIssues } from "@/lib/import-pipeline"
-import { QTYPES, DIFFICULTIES } from "@/lib/question-model"
+import { answerTextOfAnswer } from "@/lib/import-answer-key"
+import { QTYPES, DIFFICULTIES, qtypeLabel } from "@/lib/question-model"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,25 +24,40 @@ import { Loader2Icon, SaveIcon } from "lucide-react"
 
 const isChoice = (qtype) => qtype === "single_choice" || qtype === "multiple_choice"
 
+// 表单里答案的初值；切换「另一份答案」后重新灌入也用它——两处口径必须一致
+const answerStateOf = (content) => ({
+  keys: [...(content?.answer?.keys ?? [])],
+  value: content?.answer?.value ?? true,
+  values: [...(content?.answer?.values ?? [])],
+  samples: (content?.answer?.samples ?? []).join("\n"),
+})
+
 // 这道题是不是"还差答案"（入库会被拒的那类）：用来高亮提示，别让人对着表单猜哪里没填
 const stillNeedsAnswer = (qtype, content) =>
   draftIssues(qtype, content).some((s) => s.includes("答案") || s.includes("空位"))
 
-export function ImportItemEditor({ item, onClose, onSaved }) {
+export function ImportItemEditor({ item, resetToken = 0, onClose, onSaved }) {
   const [qtype, setQtype] = useState(item.qtype)
   const [difficulty, setDifficulty] = useState(item.difficulty)
   const [stem, setStem] = useState(() => blocksToPlain(item.content?.stem))
   const [options, setOptions] = useState(() =>
     (item.content?.options ?? []).map((o) => ({ key: o.key, text: blocksToPlain(o.label) }))
   )
-  const [answer, setAnswer] = useState(() => ({
-    keys: [...(item.content?.answer?.keys ?? [])],
-    value: item.content?.answer?.value ?? true,
-    values: [...(item.content?.answer?.values ?? [])],
-    samples: (item.content?.answer?.samples ?? []).join("\n"),
-  }))
+  const [answer, setAnswer] = useState(() => answerStateOf(item.content))
   const [analysis, setAnalysis] = useState(() => blocksToPlain(item.content?.analysis))
+  // 复合题各小问的题干（按 content.sub 的下标一一对应）。
+  // 只存文本：题型/选项/答案原样带回去，不在这里改。
+  const [subStems, setSubStems] = useState(() =>
+    (item.content?.sub ?? []).map((sub) => blocksToPlain(sub?.stem))
+  )
   const [busy, setBusy] = useState(false)
+
+  // 上层切换了「另一份答案」：把答案输入重新灌成换过来的那份。
+  // 只重灌答案，题干/解析里正在改的内容不动；普通轮询刷新不会触发（resetToken 只在切换后变）。
+  useEffect(() => {
+    setAnswer(answerStateOf(item.content))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetToken])
 
   function buildContent() {
     const content = { format_version: 1, stem: textToBlocks(stem) }
@@ -54,8 +71,11 @@ export function ImportItemEditor({ item, onClose, onSaved }) {
     } else if (qtype === "short_answer") {
       content.answer = { type: "text", samples: answer.samples.split(/\n+/).map((s) => s.trim()).filter(Boolean) }
     } else if (qtype === "composite") {
-      // 复合题的结构（材料 + 子题）在轻量编辑器里不动，只让改材料与解析
-      content.sub = item.content?.sub ?? []
+      // 结构（几道小问、什么题型、答案）不动，只把改过的题干写回去
+      content.sub = (item.content?.sub ?? []).map((sub, i) => ({
+        ...sub,
+        stem: textToBlocks(subStems[i] ?? blocksToPlain(sub?.stem)),
+      }))
       content.answer = item.content?.answer
     }
     if (analysis.trim()) content.analysis = textToBlocks(analysis)
@@ -268,9 +288,36 @@ export function ImportItemEditor({ item, onClose, onSaved }) {
       )}
 
       {qtype === "composite" && (
-        <p className="text-xs text-muted-foreground">
-          综合题有 {item.content?.sub?.length ?? 0} 道子题：这里只改材料与解析，子题请入库后在编辑器里调整。
-        </p>
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">
+            子题（共 {subStems.length} 道，可改题干；题型、选项与答案请入库后在完整编辑器里调整）
+          </Label>
+          {subStems.length === 0 && (
+            <p className="text-xs text-rose-600">
+              这道综合题没有解析出子题，入库会被拒绝：可回解析页重跑，或改用完整编辑器补。
+            </p>
+          )}
+          {subStems.map((text, i) => {
+            const sub = item.content?.sub?.[i] ?? {}
+            const answer = answerTextOfAnswer(sub.answer)
+            return (
+              <div key={i} className="space-y-1 rounded-lg border bg-background p-2">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">第 {i + 1} 小问</span>
+                  <span>· {qtypeLabel(sub.type)}</span>
+                  {answer && <span className="ml-auto">答案：{answer}</span>}
+                </div>
+                <Textarea
+                  value={text}
+                  onChange={(e) =>
+                    setSubStems((list) => list.map((x, j) => (j === i ? e.target.value : x)))
+                  }
+                  minRows={2}
+                />
+              </div>
+            )
+          })}
+        </div>
       )}
 
       <div className="space-y-1.5">

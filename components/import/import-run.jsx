@@ -127,6 +127,9 @@ export function ImportRun({
   const remaining = pages.filter(
     (p) => p.attempts < 3 && (p.status === "pending" || p.status === "running")
   ).length
+  // 失败但还能重试的页：主按钮认领不到它们（import_claim_pages 只认 pending），
+  // 要走「重试失败页」那个按钮
+  const retryableFailed = pages.filter((p) => p.status === "failed" && p.attempts < 3).length
 
   useEffect(() => {
     // 卸载时让循环退出。在途的那一批会自然跑完并落库——这比强行中断更好：
@@ -178,6 +181,36 @@ export function ImportRun({
       }
       if (!claimed || claimed.length === 0) {
         setLaneState((s) => ({ ...s, [laneId]: "空闲" }))
+        // 点了「继续解析」却一页都认领不到时必须说清为什么——以前这里是静默返回，
+        // 表现就是"按钮点了没反应"（2026-11-06 用户反馈）。只在第一轮说：
+        // 正常跑完一整个任务后最后一轮也会认领为空，那时不该再弹。
+        if (rounds === 1) {
+          // 认领为空 = 现在没有任何页可认领（pending 会被拿到，除非 attempts 已用满）。
+          // 用本地页状态 + 任务计数两边取大：本地可能比库里旧（另一台设备刚跑完）。
+          const localLeft = pages.filter(
+            (p) => (p.status === "pending" || p.status === "running") && p.attempts < 3
+          ).length
+          const jobLeft = Math.max(
+            0,
+            Number(job.total_pages ?? 0) - Number(job.done_pages ?? 0) - Number(job.failed_pages ?? 0)
+          )
+          const left = Math.max(localLeft, jobLeft)
+          const retryable = pages.filter((p) => p.status === "failed" && p.attempts < 3).length
+          if (left > 0) {
+            // 还有页没出结果，却没有一页能被认领：只能是「解析中 + 租约未过期」。
+            // 典型来源是上一次运行中途关闭/刷新页面，服务端要等租约过期（最长 5 分钟）。
+            setError(
+              `还有 ${left} 页没有结果、但暂时不能重新认领：多半是上一次运行中途关闭或刷新页面留下的（每页租约 5 分钟）。` +
+                `过几分钟再点「继续解析」即可，已完成的页不会重跑。`
+            )
+          } else if (retryable > 0) {
+            toast.info(`没有可认领的页：${retryable} 页解析失败，请点「重试失败页」重新排队`)
+          } else {
+            toast.info("所有页面都已解析完成，没有需要继续的页")
+          }
+          // 顺手拉一次，别让页面停在旧状态上
+          await onProgress?.()
+        }
         return
       }
       // 认领的页行直接并进本地状态：这一批的"待解析 → 解析中"立刻可见，无需查库
@@ -444,7 +477,15 @@ export function ImportRun({
           <Button
             onClick={() => start()}
             disabled={!hasFile || !hasKey || !keyReady}
-            title={hasKey ? "" : "需要先配置你自己的 DeepSeek 密钥"}
+            title={
+              !hasKey
+                ? "需要先配置你自己的 DeepSeek 密钥"
+                : remaining === 0
+                  ? retryableFailed > 0
+                    ? `${retryableFailed} 页解析失败：请点「重试失败页」重新排队`
+                    : "所有页面都已解析完成，没有需要继续的页"
+                  : ""
+            }
           >
             <PlayIcon className="size-4" />
             {remaining > 0 ? `继续解析（剩 ${remaining} 页）` : "开始解析"}

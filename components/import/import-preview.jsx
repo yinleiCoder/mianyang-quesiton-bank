@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react"
 import { answerTextOf, answerTextOfAnswer } from "@/lib/import-answer-key"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
-import { FLAG_LABELS } from "@/lib/import-jobs"
+import { FLAG_LABELS, loadJobItem } from "@/lib/import-jobs"
 import { blocksToPlain, draftIssues, itemFingerprint } from "@/lib/import-pipeline"
 import { qtypeLabel, DIFFICULTIES } from "@/lib/question-model"
 import { getDeepSeekKey, getDeepSeekModel } from "@/lib/deepseek-prefs"
@@ -123,6 +123,11 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
   // item_id → 已采纳/已保存的 [{id,name}]
   const [itemTags, setItemTags] = useState(() => new Map())
   const [tagBusy, setTagBusy] = useState(false)
+  // 切换答案后单独回读的那一行（item_id → row）。整页刷新有 1.2s 节流，
+  // 而展开着的编辑面板必须马上看到新答案；页面数据追上来后就撤掉（见下面的 effect）。
+  const [patched, setPatched] = useState(() => new Map())
+  // item_id → 切换次数。编辑面板按它重新初始化"答案"输入（题干/解析里正在改的内容不动）。
+  const [switchRev, setSwitchRev] = useState(() => new Map())
 
   // 标签字典只取一次；0129 未执行时 import_job_items 的 tag_ids 会由 loader 回退为空数组，
   // 这里仍能正常显示/推荐，只是无法把逐题标签落库。
@@ -206,11 +211,17 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
 
   // 渲染、计数、入库都看这一份：界面上的勾、"已勾选 N 道"、真正提交的 id 不能各说各话
   const view = useMemo(() => {
-    if (Object.keys(optimistic).length === 0) return items
-    return items.map((i) =>
+    const base = patched.size ? items.map((i) => patched.get(i.id) ?? i) : items
+    if (Object.keys(optimistic).length === 0) return base
+    return base.map((i) =>
       optimistic[i.id] !== undefined && optimistic[i.id] !== i.status ? { ...i, status: optimistic[i.id] } : i
     )
-  }, [items, optimistic])
+  }, [items, optimistic, patched])
+
+  // 页面数据刷新回来之后以服务端为准，撤掉切换时打的本地补丁（否则会盖住后续的改动）
+  useEffect(() => {
+    setPatched((prev) => (prev.size ? new Map() : prev))
+  }, [items])
 
   // 跨页重复：同一份 PDF 里第 1 页和第 15 页出了同一道题。
   //
@@ -359,6 +370,17 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
       const { error } = await supabase.rpc("import_switch_item_answer", { p_item_id: item.id })
       if (error) throw new Error(error.message)
       toast.success("已改用另一份答案")
+      // 立刻回读这一行：整页刷新有 1.2s 节流，展开着的编辑面板不能等它。
+      // 读失败不影响切换本身——整页刷新随后会补上，只是晚一点。
+      try {
+        const fresh = await loadJobItem(supabase, item.id)
+        if (fresh) {
+          setPatched((prev) => new Map(prev).set(item.id, fresh))
+          setSwitchRev((prev) => new Map(prev).set(item.id, (prev.get(item.id) ?? 0) + 1))
+        }
+      } catch (err) {
+        console.warn("切换答案后回读失败（页面刷新会补上）：", err?.message ?? err)
+      }
       await onRefresh()
     } catch (err) {
       toast.error(err?.message ?? "切换失败")
@@ -866,6 +888,21 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
               <p className="mt-2 line-clamp-3 text-sm text-foreground/90">
                 {blocksToPlain(it.content?.stem) || <span className="text-muted-foreground">（题干为空）</span>}
               </p>
+              {/* 综合题的小问也摆出来：以前这里只渲染材料，不点开编辑就看不到子题题干，
+                  而"小问拆错/漏问"恰恰是解析最常出错的地方，校对页看不到就无从核对。
+                  每题只显示前两行，避免 20 个小问把一页撑散。 */}
+              {it.qtype === "composite" && it.content?.sub?.length > 0 && (
+                <div className="mt-1.5 space-y-0.5 border-l-2 border-muted pl-2.5">
+                  {it.content.sub.map((sub, i) => (
+                    <p key={i} className="line-clamp-2 text-sm text-foreground/80">
+                      <span className="mr-1 text-xs font-medium text-muted-foreground">{i + 1}.</span>
+                      {blocksToPlain(sub?.stem) || (
+                        <span className="text-muted-foreground">（子题题干为空）</span>
+                      )}
+                    </p>
+                  ))}
+                </div>
+              )}
               {/* 答案一眼可见：不需要展开编辑器就能看出这题是否缺答案 */}
               <p className="mt-1 text-xs">
                 {answerText(it.content) ? (
@@ -967,7 +1004,12 @@ export function ImportPreview({ job, items, nodes = [], onRefresh }) {
               {/* 条件挂载：React Compiler 会把常挂载组件里被记忆化闭包捕获的 state.prop
                   提到渲染期求值，item 为 null 时首渲染就崩（本项目踩过） */}
               {editing === it.id && (
-                <ImportItemEditor item={it} onClose={() => setEditing(null)} onSaved={onRefresh} />
+                <ImportItemEditor
+                  item={it}
+                  resetToken={switchRev.get(it.id) ?? 0}
+                  onClose={() => setEditing(null)}
+                  onSaved={onRefresh}
+                />
               )}
             </div>
           )
