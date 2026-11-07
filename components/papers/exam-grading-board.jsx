@@ -14,14 +14,55 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { QuestionView } from "@/components/questions/question-view"
 import { AiGradeSuggest } from "@/components/papers/ai-grade-suggest"
+import { GradingAssignmentPanel } from "@/components/papers/grading-assignment-panel"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SkeletonRows } from "@/components/ui/skeletons"
 import { fmtDateTime } from "@/lib/format"
 import { round2, unitLabelsForItem } from "@/lib/paper-units"
 import { qtypeLabel } from "@/lib/question-model"
-import { CheckIcon, Loader2Icon, RefreshCwIcon, ArrowLeftIcon, UsersIcon } from "lucide-react"
+import {
+  assignAttempt,
+  claimAttempt,
+  loadAttemptCandidates,
+  releaseAttempt,
+} from "@/lib/grading-assignments"
+import {
+  CheckIcon,
+  Loader2Icon,
+  RefreshCwIcon,
+  ArrowLeftIcon,
+  UsersIcon,
+  LockIcon,
+  LockOpenIcon,
+  UserRoundCogIcon,
+} from "lucide-react"
 
 const STATUS_TEXT = { submitted: "待阅卷", grading: "阅卷中", graded: "已出分" }
+
+// 认领状态：公共池 / 我 / 其他老师。徽标只是展示，能不能操作由服务端 RPC 再判一次。
+function claimStateOf(row, currentUserId) {
+  if (!row?.claimed_by) return { text: "未认领", cls: "bg-amber-100 text-amber-800" }
+  if (row.claimed_by === currentUserId) return { text: "我认领", cls: "bg-emerald-100 text-emerald-700" }
+  return {
+    text: row.claimed_by_name ?? "其他老师",
+    cls: "bg-muted text-muted-foreground",
+  }
+}
 
 // 考生作答的纯文本呈现（阅卷时看的是"他写了什么"）
 //
@@ -230,7 +271,12 @@ function GradeRow({ item, record, onGraded }) {
   )
 }
 
-export function ExamGradingBoard({ paperId, initialQueue }) {
+export function ExamGradingBoard({
+  paperId,
+  initialQueue,
+  canManage = false,
+  currentUserId = null,
+}) {
   const supabase = createClient()
   const [queue, setQueue] = useState(initialQueue)
   const [onlyPending, setOnlyPending] = useState(true)
@@ -240,6 +286,13 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
   const [onlyPendingRows, setOnlyPendingRows] = useState(false)
   const [current, setCurrent] = useState(null) // 阅卷详情 {attempt, paper, answers}
   const [loading, setLoading] = useState(false)
+  const [claimBusy, setClaimBusy] = useState(null)
+  // 改派对话框（管理员）
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [assignCandidates, setAssignCandidates] = useState([])
+  const [assignLoading, setAssignLoading] = useState(false)
+  const [assignTarget, setAssignTarget] = useState(null)
+  const [assignBusy, setAssignBusy] = useState(false)
 
   const reloadQueue = useCallback(async () => {
     const { data, error } = await supabase.rpc("list_exam_attempts_for_paper", {
@@ -296,6 +349,61 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
     ? reviewRows.filter((r) => r.record?.grading === "pending")
     : reviewRows
 
+  async function claim(attemptId) {
+    setClaimBusy(attemptId)
+    const { error } = await claimAttempt(attemptId)
+    setClaimBusy(null)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success("已认领，这份卷由你批完")
+    await reloadQueue()
+    await openAttempt(attemptId)
+  }
+
+  async function release(attemptId) {
+    setClaimBusy(attemptId)
+    const { error } = await releaseAttempt(attemptId)
+    setClaimBusy(null)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success("已释放回公共池")
+    await reloadQueue()
+    if (current?.attempt?.id === attemptId) await openAttempt(attemptId)
+  }
+
+  async function openAssign() {
+    if (!current) return
+    setAssignOpen(true)
+    setAssignTarget(null)
+    setAssignLoading(true)
+    const { candidates, error } = await loadAttemptCandidates(current.attempt.id)
+    setAssignLoading(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    setAssignCandidates(candidates)
+  }
+
+  async function doAssign() {
+    if (!current || !assignTarget) return
+    setAssignBusy(true)
+    const { error } = await assignAttempt(current.attempt.id, assignTarget)
+    setAssignBusy(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success("已改派")
+    setAssignOpen(false)
+    await reloadQueue()
+    await openAttempt(current.attempt.id)
+  }
+
   async function finish() {
     const { data, error } = await supabase.rpc("finish_exam_grading", { p_attempt_id: current.attempt.id })
     if (error) {
@@ -307,8 +415,25 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
     await reloadQueue()
   }
 
+  const currentClaim = claimStateOf(current?.attempt, currentUserId)
+  const currentClaimedByMe = current?.attempt?.claimed_by === currentUserId
+  const currentUnclaimed = !current?.attempt?.claimed_by
+  const canFinishCurrent =
+    canManage || currentUnclaimed || currentClaimedByMe
+
   return (
-    <div className="grid min-h-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+    <div className="space-y-4">
+      {canManage && (
+        <GradingAssignmentPanel
+          paperId={paperId}
+          onAssigned={async () => {
+            await reloadQueue()
+            if (current?.attempt?.id) await openAttempt(current.attempt.id)
+          }}
+        />
+      )}
+
+      <div className="grid min-h-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium">
@@ -335,30 +460,40 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
               没有需要批阅的卷子
             </p>
           )}
-          {queue.map((a) => (
-            <button
-              key={a.attempt_id}
-              type="button"
-              onClick={() => openAttempt(a.attempt_id)}
-              className={`w-full rounded-lg border p-2.5 text-left text-sm transition-colors ${
-                current?.attempt?.id === a.attempt_id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-              }`}
-            >
-              <span className="flex items-center justify-between gap-2">
-                <span className="truncate font-medium">{a.user_name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {STATUS_TEXT[a.status] ?? a.status}
+          {queue.map((a) => {
+            const claim = claimStateOf(a, currentUserId)
+            return (
+              <button
+                key={a.attempt_id}
+                type="button"
+                onClick={() => openAttempt(a.attempt_id)}
+                className={`w-full rounded-lg border p-2.5 text-left text-sm transition-colors ${
+                  current?.attempt?.id === a.attempt_id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                }`}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium">{a.user_name}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {STATUS_TEXT[a.status] ?? a.status}
+                  </span>
                 </span>
-              </span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {fmtDateTime(a.submitted_at)}
-                {a.pending_review_count > 0 ? ` · 还有 ${a.pending_review_count} 题待判` : ""}
-              </span>
-              <span className="mt-0.5 block text-xs">
-                得分 <b className="tabular-nums">{round2(a.total_score)}</b> / {round2(a.full_score)}
-              </span>
-            </button>
-          ))}
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {[a.user_school_name, a.user_major_name].filter(Boolean).join(" · ") ||
+                    "学校/专业未设置"}
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {fmtDateTime(a.submitted_at)}
+                  {a.pending_review_count > 0 ? ` · 还有 ${a.pending_review_count} 题待判` : ""}
+                </span>
+                <span className="mt-0.5 flex items-center justify-between gap-2 text-xs">
+                  <span className={`rounded px-1.5 py-0.5 ${claim.cls}`}>{claim.text}</span>
+                  <span>
+                    得分 <b className="tabular-nums">{round2(a.total_score)}</b> / {round2(a.full_score)}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
         </div>
       </aside>
 
@@ -386,6 +521,17 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
                     {fmtDateTime(current.attempt.submitted_at)}
                   </span>
                 </p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className={`rounded px-1.5 py-0.5 ${currentClaim.cls}`}>
+                    {currentClaim.text}
+                  </span>
+                  {current.attempt.claimed_at ? (
+                    <span>认领于 {fmtDateTime(current.attempt.claimed_at)}</span>
+                  ) : null}
+                  {[current.attempt.user_school_name, current.attempt.user_major_name]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
                 <p className="mt-0.5 text-sm">
                   当前得分 <b className="tabular-nums">{round2(current.attempt.total_score)}</b> /{" "}
                   {round2(current.attempt.full_score)} 分
@@ -397,7 +543,7 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
                     : " · 全部判完"}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
@@ -407,10 +553,45 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
                   />
                   只看待判
                 </label>
+                {currentUnclaimed && current.attempt.status !== "graded" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => claim(current.attempt.id)}
+                    disabled={claimBusy === current.attempt.id}
+                  >
+                    {claimBusy === current.attempt.id ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <LockIcon className="size-4" />
+                    )}
+                    认领
+                  </Button>
+                )}
+                {!currentUnclaimed && (currentClaimedByMe || canManage) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => release(current.attempt.id)}
+                    disabled={claimBusy === current.attempt.id}
+                  >
+                    <LockOpenIcon className="size-4" /> 释放
+                  </Button>
+                )}
+                {canManage && current.attempt.status !== "graded" && (
+                  <Button size="sm" variant="outline" onClick={openAssign} disabled={assignLoading}>
+                    <UserRoundCogIcon className="size-4" />
+                    {currentUnclaimed ? "分配" : "改派"}
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" render={<Link href={`/papers/${paperId}`} />} nativeButton={false}>
                   <ArrowLeftIcon className="size-4" /> 试卷详情
                 </Button>
-                <Button size="sm" onClick={finish} disabled={pendingLeft > 0 || current.attempt.status === "graded"}>
+                <Button
+                  size="sm"
+                  onClick={finish}
+                  disabled={pendingLeft > 0 || current.attempt.status === "graded" || !canFinishCurrent}
+                >
                   <CheckIcon className="size-4" />
                   {current.attempt.status === "graded" ? "已出分" : "出成绩"}
                 </Button>
@@ -454,6 +635,62 @@ export function ExamGradingBoard({ paperId, initialQueue }) {
           </>
         )}
       </main>
+      </div>
+
+      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>改派阅卷人</DialogTitle>
+            <DialogDescription>
+              只列出能批这一场的老师（本校同专业、该科目组长/专家或试卷管理员）。
+              改派会覆盖当前认领，原认领人随后不能再改这份卷。
+            </DialogDescription>
+          </DialogHeader>
+
+          {assignLoading ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">正在加载可批老师…</p>
+          ) : assignCandidates.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              没有可改派的老师（考生学校/专业或试卷科目没匹配到）。
+            </p>
+          ) : (
+            <Select value={assignTarget} onValueChange={setAssignTarget}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择老师" />
+              </SelectTrigger>
+              <SelectContent>
+                {assignCandidates.map((c) => (
+                  <SelectItem key={c.user_id} value={c.user_id}>
+                    {c.name}
+                    {c.school_name ? `（${c.school_name}）` : ""}
+                    {c.major_name ? ` · ${c.major_name}` : ""}
+                    {c.expert_role === "group_leader"
+                      ? " · 教研组长"
+                      : c.expert_role === "city_expert"
+                        ? " · 市级专家"
+                        : ""}
+                    {Number(c.claimed_pending) > 0 ? ` · 已认领 ${c.claimed_pending} 场` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={doAssign} disabled={assignBusy || assignLoading || !assignTarget}>
+              {assignBusy ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <UserRoundCogIcon className="size-4" />
+              )}
+              确认改派
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -425,3 +425,35 @@ AI 智能解析的任务**绑定创建它的老师**，不同老师完全隔离�
 改可见性时**别只改 `import_jobs` 的策略**：`import_job_pages` / `import_job_items` /
 `import_job_sections` 三张表的读策略都走 `is_import_job_owner()`，那个函数才是主开关，
 `import_find_similar` 的守卫也用它。`import_jobs` 自己的策略是内联展开的，需要单独改。
+
+## 阅卷分摊：学校 + 专业公共池（2026-11-07，0148）
+
+0124 起填空/综合题全部人工判分，一份全市卷的待批场次会全压在试卷作者一个人身上。
+0148 把阅卷资格扩成四类（**不改 `is_paper_grader` 的纸级语义**）：
+
+1. 纸级管理员：作者 / 系统管理员 / 试卷归属学校管理员（`is_paper_grader` 原口径）；
+2. 考生所在学校的**同专业教师**：教师 `profiles.major_node_id` 与考生相同，或是考生专业的
+   祖先（教师挂「计算机类」、学生挂「计算机应用技术」也匹配）；教师未设置任教专业时按
+   本校通用阅卷人；考生专业为空时同校教师都可批；
+3. 该科目（`papers.course_node_id` 子树）的**教研组长**（考生学校）/**市级专家**（考生学校同市）；
+4. **已认领人**：教师调岗/专业变更后，已认领的场次仍能批完。
+
+默认是**公共池认领，不强制分配**：`exam_attempts.claimed_by/claimed_at` 记认领，
+第一次给分自动认领（管理员直接批不占池子）；一份答卷同时只由一位老师批。
+管理员可按场次改派、把未认领场次一键平均分配（排除试卷作者与操作人），也可释放。
+
+### 三条别再踩的
+
+- **别把新分支塞进 `is_paper_grader`**：它同时是成绩榜/试题分析/质量诊断的纸级权限开关
+  （0063 明写）。新口径在 `can_user_grade_attempt(user, attempt)` / `can_grade_attempt(attempt)`；
+  `list_exam_attempts_for_paper`、`get_exam_attempt_for_review`、`grade_exam_answer`、
+  `finish_exam_grading` 已改用它。
+- **RLS 要跟着放**：`exam_attempts` / `exam_answers` 的读策略增加了 `can_grade_attempt`；
+  否则公共池教师能打开阅卷页却读不到学生作答。
+- **认领是行锁 + 条件更新**：`grade_exam_answer` / `finish_exam_grading` 用 `for update`，
+  `claim_exam_grading` 先锁再判；不要改成无锁的 `update ... where claimed_by is null` 单独兜底，
+  否则两位老师会互相覆盖同一份卷的分数。
+
+自检：`npm run test:grading`（主观题提示词/验分不变）；SQL 侧用
+`select public.can_user_grade_attempt('<teacher_uid>','<attempt_id>')` 核对同校同专业/外校/异专业
+三种结果。网页入口：`/grading`（公共池）与 `/papers/[id]/grading`（认领/改派/平均分配）。

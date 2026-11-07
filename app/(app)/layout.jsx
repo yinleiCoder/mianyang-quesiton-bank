@@ -122,6 +122,18 @@ async function AppSidebarData() {
     }
   }
 
+  // 阅卷角标（0148）：我认领的待批 + 我能认领的未认领。
+  // 受众是公共池里的普通教师，不能并进 needsCounts；失败退 0（装饰性）。
+  let openGrading = 0
+  if (ctx.isTeacher || ctx.isSchoolAdmin || ctx.isAdmin) {
+    try {
+      const { data } = await (await createClient()).rpc("count_my_grading_pool")
+      openGrading = Number(data?.mine ?? 0) + Number(data?.pool ?? 0)
+    } catch {
+      openGrading = 0
+    }
+  }
+
   return (
     <AppSidebar
       user={{
@@ -139,6 +151,7 @@ async function AppSidebarData() {
       openReviews={openReviews}
       openReports={openReports}
       openPaperTasks={openPaperTasks}
+      openGrading={openGrading}
     />
   )
 }

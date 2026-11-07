@@ -3,7 +3,7 @@
 // 以前阅卷只有一条路：组卷库 → 试卷详情 → 阅卷按钮 —— 教师得先知道是哪份卷子。
 // 学生一交卷，没有任何地方汇总"还有几场没批"，容易漏（2026-11-05 用户提）。
 //
-// 权限不在这一页判断：list_my_grading_queue 内部按 is_paper_grader 过滤，
+// 权限不在这一页判断：list_my_grading_queue 内部按 can_user_grade_attempt(0148) 过滤，
 // 没权限的人拿到的是空表。这里只负责画。
 import Link from "next/link"
 import { requireUser } from "@/lib/auth"
@@ -23,12 +23,14 @@ export default async function GradingQueuePage() {
   const { data } = await supabase.rpc("list_my_grading_queue")
   const rows = Array.isArray(data) ? data : []
   const totalPending = rows.reduce((sum, row) => sum + Number(row.pending_attempts ?? 0), 0)
+  const totalUnclaimed = rows.reduce((sum, row) => sum + Number(row.unclaimed_attempts ?? 0), 0)
+  const totalMine = rows.reduce((sum, row) => sum + Number(row.my_attempts ?? 0), 0)
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="阅卷"
-        description="你负责的试卷里还没批完的场次。点进去逐题给分——主观题按计分点给，客观题可复核推翻。"
+        description="你能批的试卷里还没批完的场次。未认领的场次先到先得；认领后由你批完整份卷——主观题按计分点给，客观题可复核推翻。"
       />
 
       {rows.length === 0 ? (
@@ -42,6 +44,18 @@ export default async function GradingQueuePage() {
           <p className="text-sm text-muted-foreground">
             共 <b className="tabular-nums text-foreground">{rows.length}</b> 份试卷、
             <b className="tabular-nums text-foreground"> {totalPending} </b>场待阅
+            {totalUnclaimed > 0 && (
+              <>
+                <span className="mx-1.5">·</span>
+                待认领 <b className="tabular-nums text-foreground">{totalUnclaimed}</b>
+              </>
+            )}
+            {totalMine > 0 && (
+              <>
+                <span className="mx-1.5">·</span>
+                我已认领 <b className="tabular-nums text-foreground">{totalMine}</b>
+              </>
+            )}
           </p>
           <ul className="space-y-2">
             {rows.map((row) => (
@@ -60,6 +74,12 @@ export default async function GradingQueuePage() {
                       </span>
                       {Number(row.in_grading) > 0 && (
                         <span>{row.in_grading} 场已批了一部分</span>
+                      )}
+                      {Number(row.unclaimed_attempts) > 0 && (
+                        <span className="text-amber-700">待认领 {row.unclaimed_attempts}</span>
+                      )}
+                      {Number(row.my_attempts) > 0 && (
+                        <span className="text-emerald-700">我认领 {row.my_attempts}</span>
                       )}
                     </p>
                   </div>

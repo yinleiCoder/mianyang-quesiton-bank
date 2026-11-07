@@ -74,6 +74,7 @@ function useNavItems(
   openReviews = 0,
   openReports = 0,
   openPaperTasks = 0,
+  openGrading = 0,
 ) {
   // 侧栏共五组（自上而下）：导航 / AI与科技教育 / 管理台 / 我的工作 / 软件架构讲解。
   // 分组口径（2026-11-05 用户定）：
@@ -126,11 +127,11 @@ function useNavItems(
           },
         ]
       : []),
-    // 站外入口：学生遇到不会的题可以拿去问 AI 助手。external 让 NavRow 用新标签页打开，
+    // 站外入口：学生遇到不会的题可以拿去问秘塔 AI 搜索。external 让 NavRow 用新标签页打开，
     // 且不参与"当前在哪一页"的高亮（它不是本站路由）。
     {
       title: "AI 答疑",
-      url: "https://duck.ai/",
+      url: "https://metaso.cn/",
       icon: SparklesIcon,
       external: true,
     },
@@ -148,9 +149,10 @@ function useNavItems(
       : []),
     // 阅卷队列（2026-11-05）：入口以前只藏在「试卷详情 → 阅卷」里，教师得先知道
     // 是哪份卷子；学生一交卷也没有任何地方汇总"还有几场没批"。
-    // 权限由 list_my_grading_queue 里的 is_paper_grader 收口，这里只按角色给入口。
+    // 权限由 list_my_grading_queue 里的 can_user_grade_attempt 收口（0148），
+    // 角标＝我认领的待批 + 我能认领的未认领。
     ...(isTeacher || isSchoolAdmin || isAdmin
-      ? [{ title: "阅卷", url: "/grading", icon: ClipboardCheckIcon }]
+      ? [{ title: "阅卷", url: "/grading", icon: ClipboardCheckIcon, badge: openGrading }]
       : []),
     // 角标＝分给我待处理的任务数（Gmail 式），处理完 router.refresh() 会重算
     ...(isAdmin || isSchoolAdmin || isApprover
@@ -288,6 +290,7 @@ export function AppSidebar({
   openReviews = 0,
   openReports = 0,
   openPaperTasks = 0,
+  openGrading = 0,
 }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
@@ -307,6 +310,7 @@ export function AppSidebar({
     openReviews,
     openReports,
     openPaperTasks,
+    openGrading,
   );
 
   // 身份标签（角色可重叠；身份=学生/教师待审核/教师，见 0025）——文案见 lib/roles.js

@@ -60,15 +60,21 @@ export default async function PaperDetailPage({ params }) {
   // 学校名单先取（走缓存，命中时零往返），再把它传给 loadPeople ——
   // 否则 loadPeople 内部会为同样那几行再查一次（见 lib/people.js 文件头）。
   const schools = await loadSchools()
-  const [snapshot, health, nodes, people] = await Promise.all([
+  const [snapshot, health, nodes, people, canGradeRes] = await Promise.all([
     loadPaperVersion(supabase, versionId),
     loadPaperHealth(supabase, versionId),
     loadSubjectNodes(),
     loadPeople(supabase, [paper.creator_id], schools),
+    // 阅卷入口：管理员或「本校同专业教师/该科目组长或专家」且卷内有可批场次。
+    // 查询失败时退回作者/系统管理员，至少不让详情页整页报错（上线顺序：先迁移后部署）。
+    supabase
+      .rpc("can_grade_paper", { p_paper_id: id })
+      .catch(() => ({ data: null, error: new Error("can_grade_paper 查询失败") })),
   ])
   const { pathOf } = indexNodes(nodes)
   const chip = paperStatusChip(snapshot.status)
   const isOwner = paper.creator_id === ctx.user?.id
+  const canGrade = Boolean(canGradeRes?.data) || isOwner || ctx.isAdmin
 
   // 卷面题目的可用性分三类，别混成一句"题库有变化"：
   //   · 未入库：AI 一键成卷的草稿 / 在审版本 —— 要先去提交审核，刷新也刷不动；
@@ -156,9 +162,9 @@ export default async function PaperDetailPage({ params }) {
               <UsersIcon className="size-4" /> 协作分派
             </Button>
           )}
-          {/* 阅卷入口只给有权限的人（试卷作者/本校管理员/系统管理员）。
+          {/* 阅卷入口：试卷作者/本校管理员/系统管理员，以及本校同专业教师与该科目组长/专家。
               真正的权限判断在 RPC 里，这里只是不给一个点了会被拒的入口 */}
-          {snapshot.status === "published" && (isOwner || ctx.isSchoolAdmin || ctx.isAdmin) && (
+          {snapshot.status === "published" && canGrade && (
             <Button variant="outline" nativeButton={false} render={<Link href={`/papers/${paper.id}/grading`} />}>
               <ClipboardCheckIcon className="size-4" /> 阅卷
             </Button>

@@ -26,8 +26,10 @@ export default async function PaperGradingPage({ params }) {
     return <AccessDenied title="试卷不存在" description="它可能已被删除，或链接有误。" />
   }
 
-  // 首屏队列走同一个 RPC：它自己会断言阅卷权限，无权限时抛出可读原因
+  // 首屏队列走同一个 RPC：它自己会断言阅卷权限，无权限时抛出可读原因。
+  // can_manage = 试卷作者/本校管理员/系统管理员；其余人只是公共池里的可批教师。
   let queue = []
+  let canManage = false
   let denied = null
   try {
     const { data, error } = await supabase.rpc("list_exam_attempts_for_paper", {
@@ -38,6 +40,7 @@ export default async function PaperGradingPage({ params }) {
     })
     if (error) throw error
     queue = data?.attempts ?? []
+    canManage = Boolean(data?.can_manage)
   } catch (err) {
     denied = err?.message ?? "无法读取阅卷队列"
   }
@@ -77,8 +80,15 @@ export default async function PaperGradingPage({ params }) {
         <Link href={`/papers/${id}`} className="text-primary hover:underline">
           返回试卷详情
         </Link>
+        <span className="mx-2">·</span>
+        未认领的场次先到先得；认领后由你批完整份卷。
       </p>
-      <ExamGradingBoard paperId={id} initialQueue={queue} />
+      <ExamGradingBoard
+        paperId={id}
+        initialQueue={queue}
+        canManage={canManage}
+        currentUserId={ctx.user?.id ?? null}
+      />
     </div>
   )
 }
