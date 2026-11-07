@@ -828,7 +828,9 @@ export function ExamGradingBoard({
             </p>
           ) : (
             <Select value={assignTarget} onValueChange={setAssignTarget}>
-              <SelectTrigger>
+              {/* w-full：默认 trigger 是 w-fit，会把「姓名（学校）· 专业 · 已认领」截断，
+                  下拉层又按 anchor 宽度铺开，长选项就显示不全 */}
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="选择老师" />
               </SelectTrigger>
               <SelectContent>
