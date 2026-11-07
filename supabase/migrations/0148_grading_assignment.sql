@@ -878,10 +878,13 @@ begin
                  and a2.claimed_by = c.user_id))
            order by c.name, c.user_id)
     from (
-      select user_id, max(name) as name, max(school_id) as school_id,
-             max(major_node_id) as major_node_id, max(expert_role) as expert_role
+      -- 一个老师可能同时命中「同校同专业」和「组长/专家」两条分支；取一条即可。
+      -- 不用 max(uuid)：PostgreSQL 没有 uuid 的 max 聚合。distinct on 同时保证
+      -- 优先保留非空的 expert_role（nulls last）。
+      select distinct on (user_id)
+             user_id, name, school_id, major_node_id, expert_role
       from candidates
-      group by user_id
+      order by user_id, expert_role nulls last
     ) c
     left join schools s on s.id = c.school_id
     left join subject_nodes n on n.id = c.major_node_id

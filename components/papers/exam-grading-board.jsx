@@ -37,7 +37,9 @@ import { round2, unitLabelsForItem } from "@/lib/paper-units"
 import { qtypeLabel } from "@/lib/question-model"
 import {
   assignAttempt,
+  claimAllForPaper,
   claimAttempt,
+  claimAttempts,
   loadAttemptCandidates,
   releaseAttempt,
 } from "@/lib/grading-assignments"
@@ -108,13 +110,16 @@ function AnswerBody({ qtype, answer }) {
     return vals.length === 0 ? (
       <Missing />
     ) : (
-      <ol className="list-inside list-decimal space-y-0.5">
+      // 每空用 (1)(2) 而不是 <ol> 的 1. 2.：复合题的**小问**已经用了 1. 2. 3.，
+      // 里层再来一套 1. 2. 会变成「1. 2. 3. 1. 2. 4.」——阅卷时分不清哪个是第几题。
+      <ul className="list-inside space-y-0.5">
         {vals.map((v, i) => (
           <li key={i} className="whitespace-pre-wrap">
+            <span className="mr-1 text-muted-foreground tabular-nums">({i + 1})</span>
             {v || <span className="text-muted-foreground">（空）</span>}
           </li>
         ))}
-      </ol>
+      </ul>
     )
   }
   // 主观题：客户端存的是 {type:"text", text:"…"}；samples 是历史形状，一并认
@@ -293,6 +298,10 @@ export function ExamGradingBoard({
   const [assignLoading, setAssignLoading] = useState(false)
   const [assignTarget, setAssignTarget] = useState(null)
   const [assignBusy, setAssignBusy] = useState(false)
+  // 公共池：筛选 + 多选 + 批量认领
+  const [claimFilter, setClaimFilter] = useState("all") // all | pool | mine
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const reloadQueue = useCallback(async () => {
     const { data, error } = await supabase.rpc("list_exam_attempts_for_paper", {
@@ -348,6 +357,82 @@ export function ExamGradingBoard({
   const visibleReviewRows = onlyPendingRows
     ? reviewRows.filter((r) => r.record?.grading === "pending")
     : reviewRows
+
+  // 公共池 / 我的认领：队列里的 row 直接带 claimed_by，不需要再查一次。
+  // 已出分（graded）的场次不能再认领，公共池只算待批的未认领场次。
+  const poolRows = queue.filter((a) => !a.claimed_by && a.status !== "graded")
+  const myRows = queue.filter((a) => a.claimed_by === currentUserId)
+  const visibleQueue =
+    claimFilter === "pool" ? poolRows : claimFilter === "mine" ? myRows : queue
+  // 只有未认领且待批的场次能勾选/批量认领；别人的认领不给你操作。
+  const selectableRows = visibleQueue.filter(
+    (a) => !a.claimed_by && a.status !== "graded"
+  )
+  const allSelected =
+    selectableRows.length > 0 && selectableRows.every((a) => selected.has(a.attempt_id))
+
+  function switchClaimFilter(next) {
+    setClaimFilter(next)
+    setSelected(new Set())
+  }
+
+  function toggleSelect(attemptId) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(attemptId)) next.delete(attemptId)
+      else next.add(attemptId)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allSelected) {
+        selectableRows.forEach((a) => next.delete(a.attempt_id))
+      } else {
+        selectableRows.forEach((a) => next.add(a.attempt_id))
+      }
+      return next
+    })
+  }
+
+  async function claimSelected() {
+    const ids = [...selected].filter((id) =>
+      queue.some((a) => a.attempt_id === id && !a.claimed_by && a.status !== "graded")
+    )
+    if (ids.length === 0) return
+    setBulkBusy(true)
+    const { data, error } = await claimAttempts(ids)
+    setBulkBusy(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    const claimed = Number(data?.claimed ?? 0)
+    const conflicts = Array.isArray(data?.conflicts) ? data.conflicts : []
+    setSelected(new Set())
+    toast.success(
+      `已认领 ${claimed} 场${conflicts.length > 0 ? `，${conflicts.length} 场已被别人认领` : ""}`
+    )
+    await reloadQueue()
+    if (current?.attempt?.id) await openAttempt(current.attempt.id)
+  }
+
+  async function claimAll() {
+    if (poolRows.length === 0) return
+    setBulkBusy(true)
+    const { data, error } = await claimAllForPaper(paperId)
+    setBulkBusy(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    setSelected(new Set())
+    toast.success(`已认领 ${Number(data?.claimed ?? 0)} 场`)
+    await reloadQueue()
+    if (current?.attempt?.id) await openAttempt(current.attempt.id)
+  }
 
   async function claim(attemptId) {
     setClaimBusy(attemptId)
@@ -454,46 +539,134 @@ export function ExamGradingBoard({
           只看待判
         </label>
 
-        <div className="space-y-1.5">
-          {queue.length === 0 && (
-            <p className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
-              没有需要批阅的卷子
-            </p>
-          )}
-          {queue.map((a) => {
-            const claim = claimStateOf(a, currentUserId)
-            return (
+        <div className="space-y-2">
+          {/* 公共池 / 我的认领：让「还有哪些没被认领」一眼可见，而不是混在整列里 */}
+          <div className="flex flex-wrap items-center gap-1">
+            {[
+              ["all", `全部 ${queue.length}`],
+              ["pool", `公共池 ${poolRows.length}`],
+              ["mine", `我的 ${myRows.length}`],
+            ].map(([key, label]) => (
               <button
-                key={a.attempt_id}
+                key={key}
                 type="button"
-                onClick={() => openAttempt(a.attempt_id)}
-                className={`w-full rounded-lg border p-2.5 text-left text-sm transition-colors ${
-                  current?.attempt?.id === a.attempt_id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                onClick={() => switchClaimFilter(key)}
+                className={`rounded-full px-2 py-0.5 text-xs transition-colors ${
+                  claimFilter === key
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
                 }`}
               >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate font-medium">{a.user_name}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {STATUS_TEXT[a.status] ?? a.status}
-                  </span>
-                </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {[a.user_school_name, a.user_major_name].filter(Boolean).join(" · ") ||
-                    "学校/专业未设置"}
-                </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {fmtDateTime(a.submitted_at)}
-                  {a.pending_review_count > 0 ? ` · 还有 ${a.pending_review_count} 题待判` : ""}
-                </span>
-                <span className="mt-0.5 flex items-center justify-between gap-2 text-xs">
-                  <span className={`rounded px-1.5 py-0.5 ${claim.cls}`}>{claim.text}</span>
-                  <span>
-                    得分 <b className="tabular-nums">{round2(a.total_score)}</b> / {round2(a.full_score)}
-                  </span>
-                </span>
+                {label}
               </button>
-            )
-          })}
+            ))}
+          </div>
+
+          {queue.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-2 py-1.5">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  disabled={selectableRows.length === 0}
+                  className="size-3.5"
+                />
+                全选
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={claimSelected}
+                disabled={bulkBusy || selected.size === 0}
+              >
+                {bulkBusy ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <LockIcon className="size-3.5" />
+                )}
+                认领选中（{selected.size}）
+              </Button>
+              <Button size="sm" onClick={claimAll} disabled={bulkBusy || poolRows.length === 0}>
+                <CheckIcon className="size-3.5" />
+                一键认领本卷全部
+              </Button>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            {visibleQueue.length === 0 && (
+              <p className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
+                {queue.length === 0
+                  ? "没有需要批阅的卷子"
+                  : claimFilter === "pool"
+                    ? "公共池已清空（都被认领了）"
+                    : claimFilter === "mine"
+                      ? "你还没有认领任何场次"
+                      : "没有需要批阅的卷子"}
+              </p>
+            )}
+            {visibleQueue.map((a) => {
+              const claim = claimStateOf(a, currentUserId)
+              return (
+                <div
+                  key={a.attempt_id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openAttempt(a.attempt_id)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      openAttempt(a.attempt_id)
+                    }
+                  }}
+                  className={`flex w-full cursor-pointer gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors ${
+                    current?.attempt?.id === a.attempt_id
+                      ? "border-primary bg-primary/5"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  {!a.claimed_by && a.status !== "graded" ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(a.attempt_id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onChange={() => toggleSelect(a.attempt_id)}
+                      className="mt-0.5 size-3.5 shrink-0"
+                      aria-label={`选择 ${a.user_name}`}
+                    />
+                  ) : (
+                    <span className="mt-0.5 size-3.5 shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{a.user_name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {STATUS_TEXT[a.status] ?? a.status}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {[a.user_school_name, a.user_major_name].filter(Boolean).join(" · ") ||
+                        "学校/专业未设置"}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {fmtDateTime(a.submitted_at)}
+                      {a.pending_review_count > 0 ? ` · 还有 ${a.pending_review_count} 题待判` : ""}
+                    </span>
+                    <span className="mt-0.5 flex items-center justify-between gap-2 text-xs">
+                      <span className={`rounded px-1.5 py-0.5 ${claim.cls}`}>{claim.text}</span>
+                      <span>
+                        得分 <b className="tabular-nums">{round2(a.total_score)}</b> /{" "}
+                        {round2(a.full_score)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </aside>
 

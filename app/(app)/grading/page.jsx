@@ -37,7 +37,7 @@ export default async function GradingQueuePage() {
         <EmptyState
           icon={ClipboardCheckIcon}
           title="没有待阅卷的场次"
-          description="学生交卷后，只要卷子里有需要教师判分的题（简答、填空、综合），这份卷子就会出现在这里。"
+          description="学生交卷后，只要卷子里有需要教师判分的题（简答、填空、综合），这份卷子就会出现在这里。如果你不是试卷作者，需要与考生同校同专业（任教专业相同或是考生专业的上级），或担任该科目的教研组长/市级专家；任教专业可在「用户与任命 → 任教专业」设置。"
         />
       ) : (
         <>
