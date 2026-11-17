@@ -60,6 +60,12 @@ export default async function BankPage({ searchParams }) {
   // 「命中该标签的全部 version_id」再拼 .in(...)——热门标签会把 URL 撑爆（414/超时）。
   // version_tags 的主键是 (version_id, tag_id)，过滤单个标签时每个版本至多一行，
   // count 仍然准确。
+  //
+  // ⚠ **只有真的按标签筛选时才用 !inner**：!inner 是 INNER JOIN，没加 tag 条件时
+  // 也会把「一条标签都没有的已入库版本」整行排除。线上 2026-11-17 就有 55 条这样的版本，
+  // 于是本页显示 1740、首页统计卡显示 1795——"题目数对不上"就是这么来的
+  // （首页 getBankCount 没有这个 join）。不筛标签时用普通的左连接嵌入（只取不用）。
+  const tagEmbed = tag ? "version_tags!inner(tag_id)" : "version_tags(tag_id)"
   const shortCircuit = subtreeIds?.length === 0
 
   let versionRows = []
@@ -68,7 +74,7 @@ export default async function BankPage({ searchParams }) {
     let b = supabase
       .from("question_versions")
       .select(
-        "id, question_id, version_no, qtype, difficulty, content, published_at, created_by, version_tags!inner(tag_id), question:questions!question_versions_question_id_fkey!inner(id, school_id, course_node_id, state)",
+        `id, question_id, version_no, qtype, difficulty, content, published_at, created_by, ${tagEmbed}, question:questions!question_versions_question_id_fkey!inner(id, school_id, course_node_id, state)`,
         { count: "exact" }
       )
       .eq("status", "published")
@@ -78,6 +84,7 @@ export default async function BankPage({ searchParams }) {
     if (diff) b = b.eq("difficulty", Number(diff))
     if (kw) b = b.ilike("search_text", `%${escapeLike(kw)}%`)
     if (subtreeIds) b = b.in("question.course_node_id", subtreeIds)
+    // 只有 !inner 时才按标签过滤；左连接时这个条件会把没有标签的版本也筛掉
     if (tag) b = b.eq("version_tags.tag_id", tag)
     const res = await b.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
     if (res.error) throw res.error

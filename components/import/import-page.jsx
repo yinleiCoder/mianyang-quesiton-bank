@@ -321,20 +321,26 @@ export function ImportPage({ nodes, jobs, initial, supportsAnswerZone = true }) 
           这个任务已放弃：不能再继续解析或入库。已生成的草稿不受影响，解析出的题目仍留在这条任务记录里。
           需要重新导入请点右上角「新建另一个任务」。
         </p>
-      ) : tab === "run" ? (
-        // 跑批期间靠 RPC 回传的进度就地合并（不查库）；重试/跳过这类手动动作才去查
-        <ImportRun
-          job={job}
-          pages={pages}
-          fileRef={fileRef}
-          onProgressPatch={applyProgress}
-          onProgress={() => refresh(false)}
-          onFinished={() => refresh(true)}
-          onRePick={() => fileInputRef.current?.click()}
-          onRePickAnswer={() => answerInputRef.current?.click()}
-        />
       ) : (
-        <ImportPreview job={job} items={items} nodes={nodes} onRefresh={refresh} />
+        <>
+          {/* 跑批控制台**不能随页签卸载**：ImportRun 的清理函数会置 stopRef（不再认领新页），
+              解析中途切去「校对入库」再回来，这一轮就被打断了——用户看到的是"切个页签就停了"。
+              用 hidden 包一层，两个页签共用同一个实例，解析在后台继续。 */}
+          <div className={tab === "run" ? "" : "hidden"}>
+            {/* 跑批期间靠 RPC 回传的进度就地合并（不查库）；重试/跳过这类手动动作才去查 */}
+            <ImportRun
+              job={job}
+              pages={pages}
+              fileRef={fileRef}
+              onProgressPatch={applyProgress}
+              onProgress={() => refresh(false)}
+              onFinished={() => refresh(true)}
+              onRePick={() => fileInputRef.current?.click()}
+              onRePickAnswer={() => answerInputRef.current?.click()}
+            />
+          </div>
+          {tab === "preview" && <ImportPreview job={job} items={items} nodes={nodes} onRefresh={refresh} />}
+        </>
       )}
     </div>
   )

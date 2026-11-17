@@ -11,7 +11,7 @@ import {
   answerTextOf,
 } from "@/lib/import-answer-key"
 import { planImageTiles } from "@/lib/image-client"
-import { buildPageParts } from "@/lib/import-prompts"
+import { buildPageParts, buildAnswerKeyBlock, extractSectionHeadings } from "@/lib/import-prompts"
 
 let pass = 0
 let fail = 0
@@ -523,6 +523,41 @@ console.log("\n【22】答案键注入：排在最前面（前缀缓存），没
     !without.some((p) => p.type === "text" && p.text.includes('answer_source 填 "key"')),
     "没有键时不会凭空多出一段规则"
   )
+}
+
+console.log("\n【22b】同一题号跨大题重复：必须按大题匹配，且把本页大题告诉模型")
+{
+  // 线上真实形状：答案区里「一、单项选择题 31」与「三、判断题 31」是两道不同的题。
+  // 块里必须把这条规则写在模型第一眼能看到的地方。
+  const key = [
+    { section: "一、单项选择题", qno: "31", answer_text: "C" },
+    { section: "三、判断题", qno: "31", answer_text: "A" },
+  ]
+  const block = buildAnswerKeyBlock(key)
+  ok(block.includes("绝不能只按题号取"), "答案键里明确禁止只按题号取")
+  ok(block.includes("[一、单项选择题] 31：C") && block.includes("[三、判断题] 31：A"), "每条都带大题")
+
+  const parts = buildPageParts({
+    pageNo: 5,
+    text: "一、单项选择题（每小题2分）\n31. 下列正确的是（ ）\nA. 甲\nB. 乙",
+    answerKeyEntries: key,
+  })
+  ok(
+    parts.some((p) => p.type === "text" && p.text.includes("【本页卷面的大题标题】") && p.text.includes("一、单项选择题")),
+    "本页卷面的大题标题进了消息"
+  )
+
+  const noKey = buildPageParts({ pageNo: 5, text: "一、单项选择题\n31. 下列正确的是" })
+  ok(
+    !noKey.some((p) => p.type === "text" && p.text.includes("本页卷面的大题标题")),
+    "没有答案键时不加这段（老路径逐字节不变）"
+  )
+
+  const h = extractSectionHeadings(
+    "一、单项选择题（每小题2分，共40分）\n31. 下列正确的是（ ）\n三、判断题\n1. 该说法正确。"
+  )
+  ok(h.length === 2 && h[0].includes("一、单项选择题") && h[1] === "三、判断题", "大题标题抽取", h)
+  ok(normalizeQno("第 3 题") === "3", "「第3题」与「3」归一为同一题")
 }
 
 console.log("\n【23】截断的答案数组也要能抢救（salvageJson 的数组名）")

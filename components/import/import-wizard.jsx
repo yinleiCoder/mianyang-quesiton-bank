@@ -198,7 +198,11 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, suppor
           from: answerFrom,
           to: answerTo,
           key: null,
-          buildPayload: (src, n) => buildPagePayload(src, n, "auto"),
+          // 答案区固定 hybrid（文字 + 页面图），理由见 import-run.jsx 的 runAnswerPrepass：
+          // 表格排版的答案只看文字会把题号与答案对错列。纯文本模型的 hint 为 false →
+          // 退回 auto（否则模型不支持图片会被直接拒掉）。
+          buildPayload: (src, n, hint) =>
+            buildPagePayload(src, n, hint?.hybrid ? "hybrid" : "auto", "high"),
           opts: { genAnalysis, defaultDifficulty: difficulty, paperMode },
         })
         if (failures.length > 0) {
@@ -341,6 +345,58 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, suppor
           </div>
         )}
 
+        {/* 题目范围就放在文件下方（与答案区的「答案范围」同形）：选完文件第一件事就是
+            圈定范围，不必再往下滚到另一张卡片。 */}
+        {picked && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              题目范围（{picked.kind === "docx" ? "批" : "页"}）：
+            </span>
+            <Input
+              type="number"
+              min={1}
+              max={picked.pages}
+              value={from}
+              onChange={(e) => setFrom(Math.max(1, Math.min(picked.pages, Number(e.target.value) || 1)))}
+              className="w-20"
+            />
+            <span className="text-xs text-muted-foreground">到</span>
+            <Input
+              type="number"
+              min={from}
+              max={picked.pages}
+              value={to}
+              onChange={(e) => setTo(Math.max(from, Math.min(picked.pages, Number(e.target.value) || from)))}
+              className="w-20"
+            />
+            <span className="text-xs text-muted-foreground">
+              共 {to - from + 1} {picked.kind === "docx" ? "批" : "页"}
+            </span>
+            {picked.kind === "pdf" && (
+              <Button variant="outline" size="sm" onClick={handleProbe} disabled={!!busy}>
+                {busy === "probe" && <Loader2Icon className="size-4 animate-spin" />}
+                <ScanTextIcon className="size-4" />
+                检测文字层
+              </Button>
+            )}
+          </div>
+        )}
+        {probed && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline">抽样 {probed.total} 页</Badge>
+            <span className="text-emerald-700">文字版 {probed.textPages} 页</span>
+            <span className="text-amber-700">扫描件 {probed.scanPages} 页</span>
+            <span className="text-muted-foreground">
+              逐页自动判断：有文字层走文本路径（便宜），没有或含图才送图片
+            </span>
+          </div>
+        )}
+        {picked?.kind === "pdf" && !probed && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            可以先「检测文字层」看看这段是文字版还是扫描件——扫描件要送图片给模型，费用与耗时都更高。
+          </p>
+        )}
+
         <p className="mt-2 text-xs text-muted-foreground">
           文件<b>不会上传</b>，只在你的浏览器里读取——所以几百兆的卷子也能导入。关闭页面后需要重新选择同一个文件才能继续。
           {picked?.kind === "docx" &&
@@ -439,59 +495,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, suppor
 
       {picked && (
         <div className="rounded-xl border p-4">
-          <Label className="mb-2 block">
-            2. 题目范围{picked.kind === "docx" ? "（批）" : "（页）"}
-          </Label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              type="number"
-              min={1}
-              max={picked.pages}
-              value={from}
-              onChange={(e) => setFrom(Math.max(1, Math.min(picked.pages, Number(e.target.value) || 1)))}
-              className="w-24"
-            />
-            <span className="text-sm text-muted-foreground">到</span>
-            <Input
-              type="number"
-              min={from}
-              max={picked.pages}
-              value={to}
-              onChange={(e) => setTo(Math.max(from, Math.min(picked.pages, Number(e.target.value) || from)))}
-              className="w-24"
-            />
-            <span className="text-sm text-muted-foreground">
-              共 {to - from + 1} {picked.kind === "docx" ? "批" : "页"}
-            </span>
-            {picked.kind === "pdf" && (
-              <Button variant="outline" size="sm" onClick={handleProbe} disabled={!!busy}>
-                {busy === "probe" && <Loader2Icon className="size-4 animate-spin" />}
-                <ScanTextIcon className="size-4" />
-                检测文字层
-              </Button>
-            )}
-          </div>
-          {probed && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline">抽样 {probed.total} 页</Badge>
-              <span className="text-emerald-700">文字版 {probed.textPages} 页</span>
-              <span className="text-amber-700">扫描件 {probed.scanPages} 页</span>
-              <span className="text-muted-foreground">
-                逐页自动判断：有文字层走文本路径（便宜），没有或含图才送图片
-              </span>
-            </div>
-          )}
-          {!probed && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              可以先「检测文字层」看看这段是文字版还是扫描件——扫描件要送图片给模型，费用与耗时都更高。
-            </p>
-          )}
-        </div>
-      )}
-
-      {picked && (
-        <div className="rounded-xl border p-4">
-          <Label className="mb-2 block">3. 试跑一页（可选，但强烈建议）</Label>
+          <Label className="mb-2 block">2. 试跑一页（可选，但强烈建议）</Label>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleTrial} disabled={!!busy}>
               {busy === "trial" ? <Loader2Icon className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
@@ -542,7 +546,7 @@ export function ImportWizard({ nodes, jobs, fileRef, onCreated, onResume, suppor
       )}
 
       <div className="rounded-xl border p-4">
-        <Label className="mb-2 block">4. 这批题目的归属与默认值</Label>
+        <Label className="mb-2 block">3. 这批题目的归属与默认值</Label>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="imp-title" className="text-xs text-muted-foreground">

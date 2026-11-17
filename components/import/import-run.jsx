@@ -19,7 +19,7 @@ import { SourceFileError } from "@/lib/image-client"
 import { parseAndSavePages, parseAnswerSource, MissingKeyError } from "@/lib/import-parse-client"
 import { AiConfigLink } from "@/components/settings/ai-config-link"
 import { useDeepSeekPrefs } from "@/lib/use-deepseek-prefs"
-import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon } from "lucide-react"
+import { PlayIcon, PauseIcon, RotateCcwIcon, AlertTriangleIcon, Loader2Icon } from "lucide-react"
 
 // 解析节奏：**只有一条车道**，不再提供"多车道并发"档位。
 //
@@ -94,6 +94,9 @@ export function ImportRun({
   onRePickAnswer,
 }) {
   const [running, setRunning] = useState(false)
+  // 已点「暂停」、但还在等在途的那一批跑完并落库。这期间**不能**把开始按钮放出来：
+  // startedRef 还挂着，点下去会被 start() 静默忽略——表现就是"继续解析点了没反应"。
+  const [stopping, setStopping] = useState(false)
   const [laneState, setLaneState] = useState({})
   // 答案区预解析的进度（0146）：{ pageNo, done, total, status }
   const [answerPrep, setAnswerPrep] = useState(null)
@@ -131,6 +134,10 @@ export function ImportRun({
   // 要走「重试失败页」那个按钮
   const retryableFailed = pages.filter((p) => p.status === "failed" && p.attempts < 3).length
 
+  // onProgress 每次父组件渲染都是新闭包：挂在 ref 上，effect 只订阅一次
+  const progressRef = useRef(onProgress)
+  progressRef.current = onProgress
+
   useEffect(() => {
     // 卸载时让循环退出。在途的那一批会自然跑完并落库——这比强行中断更好：
     // 中断会让已花的钱白费，而结果落库后页面上是"已完成"。
@@ -143,6 +150,29 @@ export function ImportRun({
       release()
     }
   }, [job.id])
+
+  // 切到别的标签页再回来时，按库里的真实进度同步一次。
+  // 浏览器会在后台节流/冻结标签页（甚至整页重新加载），循环可能已经停下，
+  // 而页面上还停在"解析中"的旧状态上——那正是"回来点继续解析像是没反应"的来源之一。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") progressRef.current?.()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [])
+
+  // 解析期间刷新/关闭页面给一次浏览器确认（在途那一批会白花钱）。
+  // 拦不住"浏览器休眠标签页"，但能拦住手滑的刷新与关窗。
+  useEffect(() => {
+    if (!running) return
+    const onBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => window.removeEventListener("beforeunload", onBeforeUnload)
+  }, [running])
 
   async function runLane(laneId) {
     const supabase = createClient()
@@ -351,7 +381,12 @@ export function ImportRun({
         to,
         // 上一次跑到一半的进度（pages 里记着哪几页已 ok）从这个 ref 里接着来
         key: answerKeyRef.current,
-        buildPayload: (src, n) => buildPagePayload(src, n, "auto", "high"),
+        // 答案区**固定走 hybrid（文字 + 页面图）**：答案常用几列对齐的表格排版，
+        // 而表格边框是矢量线、probe 的 hasImage 是 false，auto 只会走纯文本路径——
+        // 文字抽取把「题号一行、答案一行」按内容顺序吐出来，模型只能猜列对应关系。
+        // 纯文本模型不支持图片，parseAnswerSource 会把 hint.hybrid 置 false（退回 auto）。
+        buildPayload: (src, n, hint) =>
+          buildPagePayload(src, n, hint?.hybrid ? "hybrid" : "auto", "high"),
         shouldStop: () => stopRef.current,
         onPage: (p) => setAnswerPrep({ total: p.total, done: p.done, pageNo: p.pageNo, status: p.status }),
         opts: {
@@ -410,7 +445,24 @@ export function ImportRun({
 
   async function start(force) {
     const forced = force === true // 只认显式 true：onClick 会把事件对象传进来，别让它绕过锁
-    if (startedRef.current || !hasFile || running) return
+    // 上一轮还在跑/收尾：**必须说话**。这里以前是静默 return，按钮看起来能点、
+    // 点下去什么也不发生（2026-11-17 用户报的"继续解析没响应"）。
+    if (startedRef.current || running) {
+      toast.info("上一批还在解析或收尾，请等它结束再点（已解析的结果会照常落库）")
+      return
+    }
+    // 文件不在内存里 = 页面被浏览器重新加载过（休眠标签页/手动刷新）。
+    // 直接把选文件的对话框打开，并说清楚已完成的页不会重跑。
+    if (!hasFile) {
+      toast.info("解析文件不在内存里了（页面被浏览器重新加载过）：请重新选择同一份文件，已解析的页不会重跑")
+      onRePick?.()
+      return
+    }
+    if (!hasKey) {
+      refreshKey()
+      toast.error("需要先配置你自己的 DeepSeek 密钥")
+      return
+    }
     // 另一个标签页在跑时只提醒、不硬拦：数据库的租约保证不会重复入库，
     // 这里要防的只是"两边都调模型、都花钱"。刷新页面后旧标记仍在有效期内是常见情况，
     // 硬拦会把人挡在门外（而且是自己挡自己），所以给一个明确的"仍要继续"。
@@ -424,6 +476,7 @@ export function ImportRun({
     startedRef.current = true
     stopRef.current = false
     setRunning(true)
+    setStopping(false)
     setError(null)
     // 心跳：让其他标签页知道这里在跑（15 秒没心跳就视为已停止）
     const beat = setInterval(() => acquireRunLock(job.id), 5000)
@@ -438,7 +491,10 @@ export function ImportRun({
     } finally {
       clearInterval(beat)
       releaseRunLock(job.id)
+      // **running 只在循环真正退出后才置 false**：提前放开会让开始按钮在收尾期间
+      // 可点，而 start() 又因 startedRef 还在而拒绝——那一下就是"点了没反应"。
       setRunning(false)
+      setStopping(false)
       startedRef.current = false
       // 收尾拉一次完整的（含题列表）——中途每页只刷轻量的那部分
       await onFinished?.()
@@ -446,9 +502,10 @@ export function ImportRun({
   }
 
   function stop() {
-    // 只是"不再认领新页"：正在解析的那一批会跑完并落库（花掉的钱不该白费）
+    // 只是"不再认领新页"：正在解析的那一批会跑完并落库（花掉的钱不该白费）。
+    // 界面保持 running，另用 stopping 显示"正在停下"，等循环退出后才放出开始按钮。
     stopRef.current = true
-    setRunning(false)
+    setStopping(true)
   }
 
   async function retryFailed() {
@@ -476,20 +533,31 @@ export function ImportRun({
         {!running ? (
           <Button
             onClick={() => start()}
-            disabled={!hasFile || !hasKey || !keyReady}
+            // **文件不在内存里时不要禁用**：禁用的按钮点了没有任何反应，
+            // 而这时恰恰最需要把"重新选择文件"的入口递到用户手上（见 start 的 !hasFile 分支）。
+            disabled={!hasKey || !keyReady}
             title={
               !hasKey
                 ? "需要先配置你自己的 DeepSeek 密钥"
-                : remaining === 0
-                  ? retryableFailed > 0
-                    ? `${retryableFailed} 页解析失败：请点「重试失败页」重新排队`
-                    : "所有页面都已解析完成，没有需要继续的页"
-                  : ""
+                : !hasFile
+                  ? "文件不在内存里了：点这里重新选择同一份文件（已解析的页不会重跑）"
+                  : remaining === 0
+                    ? retryableFailed > 0
+                      ? `${retryableFailed} 页解析失败：请点「重试失败页」重新排队`
+                      : "所有页面都已解析完成，没有需要继续的页"
+                    : ""
             }
           >
             <PlayIcon className="size-4" />
             {remaining > 0 ? `继续解析（剩 ${remaining} 页）` : "开始解析"}
             {needAnswerPrepass && " · 先解析答案区"}
+          </Button>
+        ) : stopping ? (
+          // 收尾期间不给"暂停/开始"两个按钮任何一个：循环还没退出，
+          // 点了也会被忽略。显示成"正在停下"，等 finally 收干净后自然变回开始按钮。
+          <Button variant="outline" disabled>
+            <Loader2Icon className="size-4 animate-spin" />
+            正在停下（本批跑完就停）
           </Button>
         ) : (
           <Button variant="outline" onClick={stop}>
@@ -512,6 +580,13 @@ export function ImportRun({
           </span>
         )}
       </div>
+
+      {/* 跑批是浏览器里的循环（源文件不上传），标签页被浏览器休眠/重载就会停在半路。
+          提前说清楚，比事后让人以为"卡死了"强。 */}
+      <p className="text-xs text-muted-foreground/80">
+        解析在本标签页里进行，请保持页面打开。切走标签页后浏览器可能把它休眠或重新加载；
+        回来若停在半路，点「继续解析」即可——文件被清掉时先「重新选择文件」，已解析的页不会重跑。
+      </p>
 
       {/* 答案区（0146）：单独一行说清它现在是什么状态——「待解析 / 解析中 3/10 / 已解析 N 条 /
           已跳过」。没有这行，老师只会看到题目页迟迟不开始，不知道在等什么。 */}

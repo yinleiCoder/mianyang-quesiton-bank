@@ -2,7 +2,7 @@
 
 // 我的题目工作台：状态筛选、行内操作（编辑/提交/撤回/删除）、批量动作（一键提交审核 / 一键入库）。
 // 数据自管理：SSR seed + 操作后浏览器重查。
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -87,7 +87,10 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
   const [pending, setPending] = useState(null) // {kind, row}
   // 正在操作的行 id：单布尔会让整列表所有行一起转圈、一起禁用
   const [busyId, setBusyId] = useState(null)
-  // 批量动作：kind = "submit"（提交我名下可提交的题）| "publish"（通过待我入库的任务）
+  // 批量动作：{ kind: "submit"（提交我名下可提交的题）| "publish"（通过待我入库的任务）, ids }
+  // **ids 在打开确认框那一刻就定下来**（与 review-inbox 同口径），runBulk 不再回读
+  // submittable / cityIds 的闭包：条件挂载的确认框可能拿到旧闭包（空数组 → 静默 return，
+  // 表现就是"点了没反应"）。2026-11-17 用户报的正是这个。
   const [bulk, setBulk] = useState(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [progress, setProgress] = useState(null) // {done, total}
@@ -105,6 +108,27 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
     const { rows: next } = await loadMyQuestions(supabase, user.id)
     setRows(next)
   }
+
+  // 切回本页时按库里的真实状态重查一次。这个工作台很常在**另一个标签页**里开着
+  // （导入、批量审核都在别处），列表不刷新就会停在旧值：刚导入的草稿不出现，
+  // 「一键提交审核（0）」按钮是禁用的——点它当然没反应（2026-11-17 的反馈现场）。
+  // 8 秒内重进不重复查；失败静默，下次切回来再试。
+  const refreshRef = useRef(refresh)
+  const lastAutoRefreshRef = useRef(0)
+  useEffect(() => {
+    refreshRef.current = refresh
+  })
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return
+      const now = Date.now()
+      if (now - lastAutoRefreshRef.current < 8000) return
+      lastAutoRefreshRef.current = now
+      refreshRef.current?.().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [])
 
   // **row 直接由调用方传进来，不再只依赖 pending 状态**：
   // 确认框是条件挂载的，React Compiler 记忆化的闭包偶尔会拿着上一次的 pending
@@ -170,13 +194,19 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
 
   // 两个批量动作的 RPC 不同，但「确认 → 逐条 → 汇总」的流程一致，合在一个函数里。
   // 逐条而不是批量 RPC 的原因见 lib/bulk-rpc.js。
-  async function runBulk(kind) {
-    const ids = kind === "submit" ? submittable.map((r) => r.working.id) : cityIds
-    if (ids.length === 0) return
-    const supabase = createClient()
+  //
+  // ids 由确认框在打开时传入（见 bulk 状态的说明）：**不要回读 submittable / cityIds**。
+  // 空数组也要说一句话——静默 return 在界面上就是"按钮点了没反应"。
+  async function runBulk(kind, ids) {
+    if (!ids?.length) {
+      toast.error("这批操作没有可处理的题目，请刷新页面后重试")
+      setBulk(null)
+      return
+    }
     setBulkBusy(true)
     setProgress({ done: 0, total: ids.length })
     try {
+      const supabase = createClient()
       const { ok, failed } = await runEachRpc(
         ids,
         kind === "submit"
@@ -258,7 +288,7 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
             <Button
               variant="outline"
               title="把分给我审核的题目一次性通过：通过即入库、全市可见（等同逐题点「通过」）"
-              onClick={() => setBulk("publish")}
+              onClick={() => setBulk({ kind: "publish", ids: cityIds })}
               disabled={bulkBusy}
             >
               <CheckCircle2Icon className="size-4" /> 一键入库（{cityIds.length}）
@@ -267,7 +297,9 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
           <Button
             variant="outline"
             title="把当前筛选下的草稿与被退回的题一次性提交审核"
-            onClick={() => setBulk("submit")}
+            onClick={() =>
+              setBulk({ kind: "submit", ids: submittable.map((r) => r.working?.id).filter(Boolean) })
+            }
             disabled={bulkBusy || submittable.length === 0}
           >
             <SendIcon className="size-4" /> 一键提交审核（{submittable.length}）
@@ -310,23 +342,23 @@ export function MyQuestions({ initialRows, initialFilter = "all", publishableIds
           没有进度会让人以为卡死了（批量无法附意见，通过意见请逐题处理） */}
       {bulk && (
         <ConfirmDialog
-          title={bulk === "submit" ? "一键提交审核？" : "一键入库？"}
+          title={bulk.kind === "submit" ? "一键提交审核？" : "一键入库？"}
           description={
-            bulk === "submit"
-              ? `将把当前筛选下的 ${submittable.length} 道草稿/被退回的题一次性提交，进入「教研组长 → 市级专家 → 入库」审核链。` +
+            bulk.kind === "submit"
+              ? `将把当前筛选下的 ${bulk.ids.length} 道草稿/被退回的题一次性提交，进入「教研组长 → 市级专家 → 入库」审核链。` +
                 (frozenCount > 0 ? `\n另有 ${frozenCount} 道因科目节点冻结被跳过。` : "") +
                 `\n提交后可逐题撤回；退回后按意见修改重提会全链重审。`
-              : `将把分配给您的 ${cityIds.length} 道待办一次性通过，通过后题目立即入库、全市教师可见。\n批量通过不附审批意见；需要写明意见的题目请到「审批收件箱」逐题处理。`
+              : `将把分配给您的 ${bulk.ids.length} 道待办一次性通过，通过后题目立即入库、全市教师可见。\n批量通过不附审批意见；需要写明意见的题目请到「审批收件箱」逐题处理。`
           }
           confirmText={
             bulkBusy
               ? `处理中… ${progress?.done ?? 0}/${progress?.total ?? 0}`
-              : bulk === "submit"
+              : bulk.kind === "submit"
                 ? "确认提交"
                 : "确认入库"
           }
           busy={bulkBusy}
-          onConfirm={() => runBulk(bulk)}
+          onConfirm={() => runBulk(bulk.kind, bulk.ids)}
           onClose={() => setBulk(null)}
         />
       )}
