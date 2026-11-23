@@ -31,9 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
-  APK_ARMV7_ASSET,
-  APK_ASSET,
-  APK_X86_64_ASSET,
+  APK_VARIANTS,
   WIN_SETUP_ASSET,
   WIN_ZIP_ASSET,
 } from "@/lib/client-assets.mjs"
@@ -72,11 +70,11 @@ function windowsDownload(release) {
   return { url: assetUrl(WIN_ZIP_ASSET, release), setup: false }
 }
 
-/// 另一个 ABI 的安装包地址：走自动下载落地页（那一页加载即下载）。
-/// 只给"默认那个装不上"的人用——默认发的是 arm64-v8a，绝大多数真机用它就好。
-function apkLanding(name, tag) {
-  const v = tag ? `&v=${encodeURIComponent(tag)}` : ""
-  return `/download/apk?name=${encodeURIComponent(name)}${v}`
+/// 清单里的 size 是字节；按 MB 显示一位小数（APK 都在 30MB 上下）。
+function formatSize(bytes) {
+  const n = Number(bytes)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 const FEATURES = [
@@ -175,43 +173,53 @@ export function DownloadPageClient() {
                   </Badge>
                 )}
               </CardTitle>
-              <CardDescription>手机、平板（Android 7.0 及以上，64 位）</CardDescription>
+              <CardDescription>手机、平板（Android 8.0 及以上）</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <ApkDownload name={APK_ASSET} version={version ?? ""} />
-              <p className="text-xs text-muted-foreground">
+              {/* 三个 ABI 全部列出、由用户自己选（2026-11-23 改）。
+                  只留一颗主按钮 + 一条「32 位版」兜底链接时，装错的人只会看到一句
+                  「应用未安装」，仍然不知道该点哪份；推荐项（arm64-v8a）置顶、高亮，
+                  另外两份各配一句“什么设备用它”，比藏在脚注里更容易选对。
+                  清单里的 size 与资产名同源，顺手显示出来。 */}
+              <ul className="space-y-2">
+                {APK_VARIANTS.map((v) => {
+                  const size = formatSize(release?.assets?.get(v.name)?.size)
+                  return (
+                    <li
+                      key={v.name}
+                      className={
+                        v.recommended
+                          ? "flex items-start gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
+                          : "flex items-start gap-3 rounded-lg border border-border bg-background p-3"
+                      }
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                          {v.title}
+                          {v.recommended && (
+                            <Badge className="px-1.5 py-0 text-[10px]">推荐</Badge>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                          {v.desc}
+                          {size ? ` · ${size}` : ""}
+                        </p>
+                      </div>
+                      <ApkDownload
+                        name={v.name}
+                        version={version ?? ""}
+                        compact
+                        variant={v.recommended ? "default" : "outline"}
+                        className="max-w-28 shrink-0"
+                      />
+                    </li>
+                  )
+                })}
+              </ul>
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 文件由浏览器直连阿里云 OSS 下载；首次安装需在系统设置里允许「安装未知来源应用」。
+                提示「应用未安装」时先确认架构选对了；换架构重装前要先卸载旧版（系统会当成降级）。
               </p>
-              {/* 32 位手机装不上主按钮那份（arm64-v8a 只在 64 位设备上装得上），
-                  而报错只有一句「应用未安装」，不会告诉用户该换哪个文件——
-                  所以这条必须是显眼的按钮/提示块，不是脚注。见 lib/client-assets.mjs。 */}
-              <div className="rounded-lg border border-dashed border-border bg-muted/40 p-3">
-                <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <TriangleAlertIcon className="size-4 text-amber-600" />
-                  手机装不上（提示「应用未安装」）？
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  多半是老旧的 32 位手机，换这份：
-                </p>
-                <Button
-                  className="mt-2"
-                  nativeButton={false}
-                  render={<a href={apkLanding(APK_ARMV7_ASSET, version)} />}
-                >
-                  <DownloadIcon className="size-4" />
-                  下载 32 位版
-                </Button>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  用模拟器的换
-                  <a
-                    href={apkLanding(APK_X86_64_ASSET, version)}
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    x86_64 版
-                  </a>
-                  。
-                </p>
-              </div>
             </CardContent>
           </Card>
 

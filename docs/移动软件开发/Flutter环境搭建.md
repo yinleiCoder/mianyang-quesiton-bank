@@ -50,7 +50,39 @@ git config --global user.name "你的名字"
 
 # Chrome浏览器
 
-暂时不用。
+要装，而且**测试环节离不开它**：
+
+- 网页端调试与性能分析用 Chrome DevTools（网络、Performance、Lighthouse）；
+- 自动化验收脚本 `scripts/e2e-cdp.mjs` **直接驱动本机 Chrome**跑「打开 / 执行 / 点击 / 填表 / 等待 / 截图」，
+  配合 `/dev-pdf-export`、`/dev-approval-flow` 等免登录夹具页做可视化验收；
+- 网页端的 **AI 整卷导入在浏览器里用 pdfjs 解析 PDF**（含扫描件），所以 Chrome 也是这条主链路的运行环境；
+- 客户端的试卷 PDF 导出走自研的 CJK 子集字体，导出效果同样要在 Chrome 里对着 `/dev-pdf-export` 夹具页核对。
+
+脚本不依赖任何第三方浏览器自动化库，装好 Chrome 就能跑：
+
+```bash
+npm run test:pdf          # 试卷导出检查
+node scripts/e2e-cdp.mjs  # 浏览器端冒烟
+```
+
+# 美工环境（Figma / Photoshop / 蓝湖）
+
+本项目的美工只用这三件，各管一段：
+
+| 工具      | 装在哪 / 怎么用                                             | 负责什么                             |
+| ------- | ----------------------------------------------------- | -------------------------------- |
+| Figma   | 浏览器直接打开，**免安装**；学生教育版免费                          | 原型、界面稿、组件库与设计变量、标注、可点击原型       |
+| Photoshop | 官网下载安装（Adobe Creative Cloud 或免装版）                  | 位图修图、抠图、插画合成、海报底图；导出 PNG / JPG 交蓝湖 |
+| 蓝湖      | 浏览器打开 [lanhuapp.com](https://lanhuapp.com/)，国内网络友好、账号免费 | 挂载 Figma 设计稿、按 @2x/@3x 切图、标注随图下载      |
+
+工作流就一条：**Figma 出稿 → Photoshop 处理位图 → 蓝湖挂载与切图交付 → 开发按标注 1:1 还原**。
+
+⚠ 两条交付硬规矩：
+
+1. **切图只用 PNG / JPG，不用 WebP** —— 网页端的试卷 PDF 导出走 react-pdf，它不认 WebP，
+   一张 WebP 就会让整份导出挂掉（不是那一张图降级）。
+2. **切图尺寸按 @2x / @3x 出** —— 网页端与客户端用同一份素材，避免两端各存一份、慢慢长得不一样。
+
 # 代码开发编辑器IDE
 
 ## VS Code

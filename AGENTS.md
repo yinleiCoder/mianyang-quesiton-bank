@@ -177,10 +177,21 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 - `/download` 页整体挪到客户端组件（`components/download/download-page-client.jsx`）：
   清单也由浏览器取，避开上面那个"服务端读 OSS 会失败"的坑；页面因此是纯静态。
 
-### Android 安装包发哪个 ABI（2026-11-02 定案）
+### Android 安装包发哪个 ABI（2026-11-02 定案，2026-11-23 改成三份并列）
 
-**下载页默认下发 `mianyang_quiz-android.apk`（arm64-v8a），并提供一条显眼的
-「32 位版」链接指向 `mianyang_quiz-android-armv7.apk`（armeabi-v7a）。**
+**下载页把三个 ABI 全部列出来**（`lib/client-assets.mjs` 的 `APK_VARIANTS`）：
+arm64-v8a 置顶、高亮为「推荐」，32 位与模拟器各配一句适用设备说明与独立下载按钮。
+资产名与更新口径没变：推荐/默认仍是 `mianyang_quiz-android.apk`（arm64-v8a）。
+
+为什么不再是"一颗主按钮 + 一条 32 位兜底链接"：装错 ABI 的唯一报错是系统安装器的
+一句「应用未安装」，它不指向任何一个文件；把三份并列、每份写清“给谁用”，
+比让用户去猜哪颗按钮是给老手机的更可靠。三份名字都从 `APK_VARIANTS` 派生进
+`APK_ALIAS_ASSETS`，落地页 `?name=` 的白名单不会漏。
+
+⚠ **ABI 与运行时网络快慢无关**：选错的表现是**安装阶段失败**
+（`INSTALL_FAILED_NO_MATCHING_ABIS` / 「应用未安装」），不是装好之后加载慢。
+遇到"某机型网络慢"先查 DNS / IPv6 / TLS / 反代线路（`api.myquiz.cn` 是 Cloudflare
+反代，见 `mianyang_quiz/AGENTS.md`），别先换 ABI。
 
 两边的可装性是**不对称**的，这决定了怎么选：
 
@@ -191,12 +202,9 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 | 64 位-only 系统（Pixel 7 起那批） | ❌ | ✅ |
 | x86_64 模拟器 | ❌ | ❌ |
 
-**为什么默认给 arm64**：armv7 的覆盖面更大（32 位 + 64 位真机通吃），但**用户反馈里
+**为什么推荐 arm64**：armv7 的覆盖面更大（32 位 + 64 位真机通吃），但**用户反馈里
 没有"装不上"这一类**——唯一的硬信号（闪退）全在 Windows，与 ABI 无关。没有证据说
-32 位用户成规模，就先给**性能更好**的那份，32 位由页面上的备用链接兜底。
-
-**代价要说清楚**：32 位手机点主按钮会装不上，而报错只有一句「应用未安装」，
-不告诉任何人该换哪个文件——所以那条「32 位版」链接必须显眼，不能藏进脚注。
+32 位用户成规模，就先给**性能更好**的那份；32 位作为并列选项显式列出，不再藏。
 
 **更新永远不会跨 ABI**：客户端的更新检查按**自己实际在跑的 ABI** 选包
 （`mianyang_quiz/lib/utils/android_abi.dart`，从 `/proc/self/maps` 读出来），
@@ -207,7 +215,7 @@ GitHub release 资产国内直连不可用；自家成都 OSS 快。**gh-proxy �
 | 资产名 | ABI | 给谁 |
 |---|---|---|
 | `mianyang_quiz-android.apk` | arm64-v8a | **默认下发**：64 位真机 |
-| `mianyang_quiz-android-armv7.apk` | armeabi-v7a | 32 位老设备（页面上的「32 位版」链接） |
+| `mianyang_quiz-android-armv7.apk` | armeabi-v7a | 32 位老设备（下载页并列列出） |
 | `mianyang_quiz-android-x86_64.apk` | x86_64 | 模拟器 |
 
 **三处必须同时改**（改一处就是"装的是 A、更新推的是 B"）：

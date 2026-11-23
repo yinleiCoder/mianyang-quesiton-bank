@@ -23,7 +23,17 @@ const APK_MIME = "application/vnd.android.package-archive"
 // NEXT_PUBLIC_ 前缀：构建时内联进客户端 bundle
 const OSS_HOST = process.env.NEXT_PUBLIC_OSS_PUBLIC_HOST
 
-export function ApkDownload({ name, version = "", autoStart = false, className }) {
+export function ApkDownload({
+  name,
+  version = "",
+  autoStart = false,
+  className,
+  /// 紧凑模式：下载页的 ABI 列表用。按钮缩成一颗小按钮、状态挤进按钮文字里，
+  /// 不再占一整行——三种 ABI 并排列出时，主次由外层决定（推荐项用默认色按钮）。
+  compact = false,
+  variant = "default",
+  idleLabel,
+}) {
   const [state, setState] = useState("idle") // idle | downloading | done | error
   const [progress, setProgress] = useState(0)
   const busy = useRef(false)
@@ -110,17 +120,32 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
   const label =
     state === "downloading"
       ? progress
-        ? `正在下载 ${progress}%`
-        : "正在下载…"
+        ? compact
+          ? `${progress}%`
+          : `正在下载 ${progress}%`
+        : compact
+          ? "下载中"
+          : "正在下载…"
       : state === "done"
-        ? "已开始下载"
+        ? compact
+          ? "已开始"
+          : "已开始下载"
         : state === "error"
-          ? "重试下载"
-          : "下载 APK"
+          ? compact
+            ? "重试"
+            : "重试下载"
+          : (idleLabel ?? "下载 APK")
 
   return (
     <div className={className}>
-      <Button className="w-full" onClick={start} disabled={state === "downloading"}>
+      <Button
+        className={compact ? undefined : "w-full"}
+        size={compact ? "sm" : undefined}
+        variant={compact ? variant : undefined}
+        onClick={start}
+        disabled={state === "downloading"}
+        aria-label={compact ? `下载 ${name}` : undefined}
+      >
         {state === "downloading" ? (
           <LoaderCircleIcon className="size-4 animate-spin" />
         ) : state === "done" ? (
@@ -131,19 +156,25 @@ export function ApkDownload({ name, version = "", autoStart = false, className }
         {label}
       </Button>
 
-      {state === "downloading" && (
+      {!compact && state === "downloading" && (
         <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={cancel}>
           取消下载
         </Button>
       )}
 
-      {state === "done" && (
+      {!compact && state === "done" && (
         <p className="mt-2 text-xs text-muted-foreground">
           已交给浏览器保存为 {name}，请到通知栏或下载列表里打开安装。
         </p>
       )}
       {state === "error" && (
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p
+          className={
+            compact
+              ? "mt-1 text-[10px] leading-snug text-muted-foreground"
+              : "mt-2 text-xs text-muted-foreground"
+          }
+        >
           下载失败，请检查网络后重试。
           {aliasUrl && (
             <>
