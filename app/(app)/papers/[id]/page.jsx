@@ -67,9 +67,18 @@ export default async function PaperDetailPage({ params }) {
     loadPeople(supabase, [paper.creator_id], schools),
     // 阅卷入口：管理员或「本校同专业教师/该科目组长或专家」且卷内有可批场次。
     // 查询失败时退回作者/系统管理员，至少不让详情页整页报错（上线顺序：先迁移后部署）。
-    supabase
-      .rpc("can_grade_paper", { p_paper_id: id })
-      .catch(() => ({ data: null, error: new Error("can_grade_paper 查询失败") })),
+    //
+    // ⚠ 这里**不能**写 `supabase.rpc(...).catch(...)`：postgrest 的查询构造器是 thenable，
+    //   但没有 catch（@supabase/postgrest-js 实测 typeof builder.catch === "undefined"），
+    //   直接链会同步抛 TypeError，整页进错误边界（2026-11-23 线上就是这个问题）。
+    //   要兜异常只能包一层 async + try/catch，或走 .then(onFulfilled, onRejected)。
+    (async () => {
+      try {
+        return await supabase.rpc("can_grade_paper", { p_paper_id: id })
+      } catch {
+        return { data: null, error: new Error("can_grade_paper 查询失败") }
+      }
+    })(),
   ])
   const { pathOf } = indexNodes(nodes)
   const chip = paperStatusChip(snapshot.status)
